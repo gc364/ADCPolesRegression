@@ -3,11 +3,7 @@ import scipy
 import matplotlib.pyplot as plt
 import netCDF4 as nc
 from pathlib import Path
-
-"""TODO:    This need to be essentially FWI but for the spectra, so we need to implement a sense of spectra difference"""
-
-
-
+import tqdm
 
 def load_pulses(pulses_path):
     pulses = np.loadtxt(pulses_path,delimiter='\t')
@@ -16,8 +12,6 @@ def load_pulses(pulses_path):
 def plot_xy(X_spec,Y_spec,frequencies,nplots=4,outfile='data_test.png'):
     n = len(Y_spec)%nplots
     n = (len(Y_spec)-n)//nplots
-
-
     Y_spec_plot = Y_spec[::n]
     X_spec_plot = X_spec[::n]
     fig,ax  = plt.subplots(nplots,2,layout='constrained')
@@ -146,7 +140,6 @@ def create_G(poles,zeros,X_spectra,Y_spectra,frequencies):
         diff = (g(ap,zeros,X_spectra,Y_spectra,frequencies)-g(an,zeros,X_spectra,Y_spectra,frequencies))/eps
 
         G[:,zeros.shape[0]+m] = diff
-
     return G
 
 def L2_norm(d_obs,d):
@@ -155,12 +148,14 @@ def L2_norm(d_obs,d):
 def g(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequencies:np.ndarray,data_only=False):
     """The forward model for a list of spectra and frequencies"""
     ret = []
+   
+    omega = np.exp(-2*np.pi*1j*frequencies)
     for X in X_spectra:
         num=np.ones_like(X,dtype=np.complex128)
         den = np.ones_like(X,dtype=np.complex128)
         for ma,mb in zip(poles,zeros):
-            num *=(frequencies-mb)
-            den *= (frequencies-ma)
+            num *=(omega-mb)
+            den *= (omega-ma)
         
         ret.append((num/den)*X)
     ret = data_transform(ret)
@@ -169,29 +164,74 @@ def g(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequenc
     ret = [L2_norm(d_obs,d) for d_obs,d in zip(Y_spectra,ret)]
     return np.array(ret)
 
-def hess(m,nzeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequencies:np.ndarray):
-    zeros = m[:nzeros]
-    poles = m[nzeros:]
-    
-
-    G = create_G(poles,zeros,X_spectra,Y_spectra,frequencies)
-
+def hess(G):
     return G.T@G
 
-def jac(m,nzeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequencies:np.ndarray):
+def jac(G,m,nzeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequencies:np.ndarray):
     zeros = m[:nzeros]
     poles = m[nzeros:]
     
-
-    G = create_G(poles,zeros,X_spectra,Y_spectra,frequencies)
-
     return G.T@(-g(poles,zeros,X_spectra,Y_spectra,frequencies))
 
 def model_update(m_last,nzeros,Qm,X_spectra,Y_spectra,frequencies):
-    H = hess(m_last,nzeros,X_spectra,Y_spectra,frequencies)
-    s = jac(m_last,nzeros,X_spectra,Y_spectra,frequencies)
+    zeros = m_last[:nzeros]
+    poles = m_last[nzeros:]
+    G = create_G(poles,zeros,X_spectra,Y_spectra,frequencies)
+
+    H = hess(G)
+    s = jac(G,m_last,nzeros,X_spectra,Y_spectra,frequencies)
     m_post  = m_last+ np.linalg.solve(H+Qm,s)
     return m_post
+
+
+def optimise(nz,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
+    """Optimise for the poles and zeros"""
+    poles = np.linspace(50,1000,nz)+np.linspace(0j,100j,nz)#np.array([250+2j,250-2j])
+    zeros = np.linspace(50,1000,nz)#np.array([-250,250])
+    #   Zeros First, Poles second
+    m0 = np.concatenate([zeros,poles])
+    Qm = np.eye(poles.shape[0]+zeros.shape[0])*alpha
+    mi = m0
+    losses = []
+    for e in tqdm.tqdm(range(nepochs),desc = 'Optimising'):
+        mi1 = model_update(mi,nz,Qm,X_spectra,Y_spectra,frequencies)
+        loss  = g(mi[nz:],mi[:nz].real,X_spectra,Y_spectra,frequencies)
+        losses.append(sum(loss**2)**0.5)
+        mi = mi1
+        mi[:nz] = mi[:nz].real
+    m_post = mi
+    return m_post,losses
+
+def calculate_C_posterior(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,alpha):
+    G = create_G(poles_final,zeros_final,X_spectra,Y_spectra,frequencies)
+    Qm = alpha*np.eye(G.shape[1])
+    return np.linalg.inv(hess(G)+Qm)
+
+
+def determine_nz(nzs,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
+    """
+    Determines the best order of polynomial via an L-curve
+    """
+    #   The Determination of optimum number of poles
+    m_norms = []
+    d_norms = []
+    for nz in nzs:
+        m_post,losses = optimise(nz,X_spectra,Y_spectra,frequencies,nepochs,alpha)
+        d_norms.append(losses[-1])
+        m_norms.append(m_post@m_post.T)
+    log_d_norms = np.log10(d_norms)
+    log_m_norms = np.log10(m_norms)
+    fig,ax =  plt.subplots()
+    ax.plot(log_m_norms,log_d_norms)
+    ax.set_ylabel(r'||d||')
+    ax.set_xlabel(r'||m||')
+    plt.savefig('Nz.png')
+
+    grad = np.diff(log_d_norms)/np.diff(log_m_norms)
+    min_ind = np.argmin(grad)
+    nz_opt = (nzs[min_ind+1]-nzs[min_ind])//2
+    return int(nz_opt)
+
 
 def main():
    
@@ -199,29 +239,36 @@ def main():
     nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
     pulses_path = workdir.joinpath('processed/pulses.txt')
     X_spectra,Y_spectra,frequencies  = load_xy(pulses_path,nc_path)
-    poles = np.array([250+2j,250-2j])
-    zeros = np.array([-250,250])
-    nz = zeros.shape[0]
-
-    #   Zeros First, Poles second
-    m0 = np.concatenate([zeros,poles])
-
-
-    Qm = np.eye(poles.shape[0]+zeros.shape[0])*100
+    alpha = 1e-2
     nepochs = 100
-    mi = m0
-    losses = []
-    for e in range(nepochs):
-        mi1 = model_update(mi,nz,Qm,X_spectra,Y_spectra,frequencies)
-        loss  = g(mi[nz:],mi[:nz].real,X_spectra,Y_spectra,frequencies)
-        losses.append(sum(loss**2)**0.5)
-        mi = mi1
-        mi[:nz] = mi[:nz].real
-    
-    m_post = mi
-    print(m_post)
-    fig,ax = plt.subplots()
-    ax.plot(losses)
-    plt.savefig('losses.png')
+    nzs = np.linspace(10,100,10,dtype=np.int64)
+    #nz_optimum = determine_nz(nzs,X_spectra,Y_spectra,frequencies,100)
 
-main()
+    nz = 50 #nz_optimum
+
+    m_post,losses = optimise(nz,X_spectra,Y_spectra,frequencies,nepochs,alpha)
+
+    poles_final = m_post[nz:]
+    zeros_final = m_post[:nz]
+
+    np.save('PolesandZeros.npy',np.column_stack([poles_final,zeros_final]))
+    C_post = calculate_C_posterior(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,alpha)
+    np.save('PosteriorCovariance.npy',C_post)
+    data_reconst = g(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,True)
+
+    fig,(ax,ax1) = plt.subplots(2,layout='constrained')
+    ax.plot(losses)
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel(r'$||\Delta d||_{2}^{2}$')
+    for y,d in zip(Y_spectra,data_reconst):
+        ax1.plot(frequencies,y,'r')
+        ax1.plot(frequencies,d,'k')
+    fig.savefig('losses.png')
+    plt.close()
+    fig,ax = plt.subplots(layout='constrained')
+    im = ax.imshow(C_post.real)
+    plt.colorbar(im,ax=ax,label='Posterior Variance')
+    plt.savefig('PosteriorCovar.png',dpi=256)
+
+if __name__ == '__main__':
+    main()
