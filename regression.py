@@ -28,7 +28,8 @@ def plot_xy(X_spec,Y_spec,frequencies,nplots=4,outfile='data_test.png'):
 def cut_timeseries(y,chattr,start_times,length_seconds):
     dataset_start_time = chattr['data_start']
     sample_rate = chattr['sample_rate_hz']
-
+    if dataset_start_time <= 86400:
+        dataset_start_time = start_times[0]
     start_samples = ((start_times - dataset_start_time)*sample_rate).astype(np.int64)
     length_samples = (length_seconds*sample_rate).astype(np.int64)
     ret = []
@@ -69,7 +70,7 @@ def load_xy(pulses_path,data_path):
     Y_spectra = [np.fft.rfft(y,n=n) for y in y_time]
     Y_frequencies = np.fft.rfftfreq(n=n,d=1/chattr['sample_rate_hz'])
 
-    target_high = 1500
+    target_high = 1500  #The highest frequency we're interested in
     df_y = Y_frequencies[1]-Y_frequencies[0]
     max_f = Y_frequencies.max()
     #We need to pad the frequencies to get to 1500 Hz
@@ -79,22 +80,6 @@ def load_xy(pulses_path,data_path):
     n = Y_frequencies.shape[0]
 
     #   Calculate X spectra       
-
-    #   This creates a spike in frequency domain, I'm no sure it works properly
-    # X_frequencies = Y_frequencies
-    # X_spectra = [np.zeros(X_frequencies.shape[0]) for _ in range(len(Y_spectra))]
-    # #   Need the indices
-    # indices = []
-    # for target in X_known_freqs:
-    #     indices.append(X_frequencies.round()==round(target))
-    # for ind,spec in zip(indices,range(len(X_spectra))):
-    #     X_spectra[spec][ind] = 1
-    # fig,ax = plt.subplots()
-    # ax.plot(X_frequencies,X_spectra[4])
-    # plt.savefig('test.png')   
-    # fig,ax = plt.subplots()
-    # ax.plot(np.fft.irfft(X_spectra[0]))
-    # plt.savefig('test.png')
 
     x_timeseries = []
 
@@ -121,7 +106,7 @@ def create_G(poles,zeros,X_spectra,Y_spectra,frequencies):
     """This creates the Jacobian"""
     G = np.zeros(shape=(len(X_spectra),poles.shape[0]+zeros.shape[0]),dtype=np.complex128)
     eps = 1e-12
-
+    epsi = eps*1j
     for m in range(zeros.shape[0]):
         bp = zeros.copy()
         bp[m] +=eps
@@ -134,9 +119,9 @@ def create_G(poles,zeros,X_spectra,Y_spectra,frequencies):
     for m in range(poles.shape[0]):
         
         ap = poles.copy()
-        ap[m] +=eps
+        ap[m] +=eps+epsi
         an = poles.copy()
-        an[m] -=eps
+        an[m] -=eps+epsi
         diff = (g(ap,zeros,X_spectra,Y_spectra,frequencies)-g(an,zeros,X_spectra,Y_spectra,frequencies))/eps
 
         G[:,zeros.shape[0]+m] = diff
@@ -145,11 +130,21 @@ def create_G(poles,zeros,X_spectra,Y_spectra,frequencies):
 def L2_norm(d_obs,d):
     return np.sqrt((d_obs-d)@(d_obs-d).T)
 
+def calculate_transfer_function(poles,zeros,omega):
+    assert poles.shape[0]==zeros.shape[0]
+    num=1
+    den = 1
+    for ma,mb in zip(poles,zeros):
+        num *=(omega-mb)
+        den *= (omega-ma)
+    return num/den
+
 def g(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequencies:np.ndarray,data_only=False):
     """The forward model for a list of spectra and frequencies"""
     ret = []
-   
-    omega = np.exp(-2*np.pi*1j*frequencies)
+    #   We only search for poles in the upper right quadrant, and append the remaining co
+    poles = np.concatenate([poles,np.conj(poles)])
+    omega =2*np.pi*1j*frequencies
     for X in X_spectra:
         num=np.ones_like(X,dtype=np.complex128)
         den = np.ones_like(X,dtype=np.complex128)
@@ -186,8 +181,9 @@ def model_update(m_last,nzeros,Qm,X_spectra,Y_spectra,frequencies):
 
 def optimise(nz,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
     """Optimise for the poles and zeros"""
-    poles = np.linspace(50,1000,nz)+np.linspace(0j,100j,nz)#np.array([250+2j,250-2j])
-    zeros = np.linspace(50,1000,nz)#np.array([-250,250])
+    #   Choose a better starting point for the poles, perhaps a grid around the unit circle
+    poles = np.linspace(0.1,100,nz//2)+np.linspace(0j,100j,nz//2)
+    zeros = np.linspace(-100,100,nz)+1e-1
     #   Zeros First, Poles second
     m0 = np.concatenate([zeros,poles])
     Qm = np.eye(poles.shape[0]+zeros.shape[0])*alpha
@@ -199,6 +195,7 @@ def optimise(nz,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
         losses.append(sum(loss**2)**0.5)
         mi = mi1
         mi[:nz] = mi[:nz].real
+        mi[nz:] = abs(mi[nz:].real)+1j*mi[nz:].imag
     m_post = mi
     return m_post,losses
 
@@ -234,27 +231,49 @@ def determine_nz(nzs,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
 
 
 def main():
-   
     workdir = Path('/run/media/obic/SSD/test/ADC_Filter_0')
     nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
     pulses_path = workdir.joinpath('processed/pulses.txt')
     X_spectra,Y_spectra,frequencies  = load_xy(pulses_path,nc_path)
-    alpha = 1e-2
-    nepochs = 100
-    nzs = np.linspace(10,100,10,dtype=np.int64)
-    #nz_optimum = determine_nz(nzs,X_spectra,Y_spectra,frequencies,100)
+    alpha = 1000
+    nepochs = 200
+    new_optimise = True
+    if new_optimise:
+        nzs = np.linspace(10,100,10,dtype=np.int64)
+        #nz_optimum = determine_nz(nzs,X_spectra,Y_spectra,frequencies,100)
+        nz = 50 #nz_optimum
+        m_post,losses = optimise(nz,X_spectra,Y_spectra,frequencies,nepochs,alpha)
+        poles_final = m_post[nz:]
+        zeros_final = m_post[:nz]
 
-    nz = 50 #nz_optimum
+        np.save('PolesandZeros.npy',np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),zeros_final]))
+        C_post = calculate_C_posterior(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,alpha)
+        np.save('PosteriorCovariance.npy',C_post)
+        data_reconst = g(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,True)
+    else:
+        C_post = np.load('PosteriorCovariance.npy')
+        pandz =  np.load('PolesandZeros.npy')
+        poles_final = pandz[:,0]
+        zeros_final = pandz[:,1]
 
-    m_post,losses = optimise(nz,X_spectra,Y_spectra,frequencies,nepochs,alpha)
+    fig,ax = plt.subplots(2,layout='constrained')
+    H = calculate_transfer_function(poles_final,zeros_final,2*np.pi*1j*frequencies)
+    print(H)
+    ax[0].plot(frequencies,H.real)
+    ax[1].set_xlabel('Frequency (Hz)')
+    ax[0].set_ylabel(r'$\mathfrak{R}$')
+    ax[1].set_ylabel(r'$\mathfrak{I}$')
+    ax[1].plot(frequencies,H.imag)
+    plt.savefig('Transfer_function.png')
+    plt.close()
 
-    poles_final = m_post[nz:]
-    zeros_final = m_post[:nz]
+    fig,ax = plt.subplots(layout='constrained')
+    ax.plot(poles_final.real,poles_final.imag,'x',label='Poles')
+    ax.plot(zeros_final.real,zeros_final.imag,'o',label='Zeros')
+    ax.set_ylabel(r'$\mathfrak{Im}$')
+    ax.set_ylabel(r'$\mathfrak{Re}$')
 
-    np.save('PolesandZeros.npy',np.column_stack([poles_final,zeros_final]))
-    C_post = calculate_C_posterior(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,alpha)
-    np.save('PosteriorCovariance.npy',C_post)
-    data_reconst = g(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,True)
+
 
     fig,(ax,ax1) = plt.subplots(2,layout='constrained')
     ax.plot(losses)
