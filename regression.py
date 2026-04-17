@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import netCDF4 as nc
 from pathlib import Path
 import tqdm
+from numpy.polynomial import Polynomial
+from filter_coeffs import *
 
 def load_pulses(pulses_path):
     pulses = np.loadtxt(pulses_path,delimiter='\t')
@@ -183,7 +185,7 @@ def optimise(nz,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
     """Optimise for the poles and zeros"""
     #   Choose a better starting point for the poles, perhaps a grid around the unit circle
     poles = np.linspace(0.1,100,nz//2)+np.linspace(0j,100j,nz//2)
-    zeros = np.linspace(-100,100,nz)+1e-1
+    zeros = np.linspace(-100,100,nz)
     #   Zeros First, Poles second
     m0 = np.concatenate([zeros,poles])
     Qm = np.eye(poles.shape[0]+zeros.shape[0])*alpha
@@ -229,32 +231,40 @@ def determine_nz(nzs,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
     nz_opt = (nzs[min_ind+1]-nzs[min_ind])//2
     return int(nz_opt)
 
-
+def example_filter():
+    coeffs = STAGE1_LINEAR
+    transfer_function = Polynomial(coeffs)
+    return 
 def main():
     workdir = Path('/run/media/obic/SSD/test/ADC_Filter_0')
     nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
     pulses_path = workdir.joinpath('processed/pulses.txt')
     X_spectra,Y_spectra,frequencies  = load_xy(pulses_path,nc_path)
-    alpha = 1000
-    nepochs = 200
+    alpha = 1e-3
+    nepochs = 50
     new_optimise = True
     if new_optimise:
         nzs = np.linspace(10,100,10,dtype=np.int64)
         #nz_optimum = determine_nz(nzs,X_spectra,Y_spectra,frequencies,100)
-        nz = 50 #nz_optimum
+        nz = 100 #nz_optimum
         m_post,losses = optimise(nz,X_spectra,Y_spectra,frequencies,nepochs,alpha)
         poles_final = m_post[nz:]
         zeros_final = m_post[:nz]
-
-        np.save('PolesandZeros.npy',np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),zeros_final]))
+        pandz = np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),zeros_final])
+        np.save('PolesandZeros.npy',pandz)
         C_post = calculate_C_posterior(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,alpha)
         np.save('PosteriorCovariance.npy',C_post)
         data_reconst = g(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,True)
+
+        poles_final = pandz[:,0]
+        zeros_final = pandz[:,1]
     else:
         C_post = np.load('PosteriorCovariance.npy')
         pandz =  np.load('PolesandZeros.npy')
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
+        nz = zeros_final.shape[0]
+        data_reconst = g(poles_final[:nz//2],zeros_final,X_spectra,Y_spectra,frequencies,True)
 
     fig,ax = plt.subplots(2,layout='constrained')
     H = calculate_transfer_function(poles_final,zeros_final,2*np.pi*1j*frequencies)
@@ -272,11 +282,13 @@ def main():
     ax.plot(zeros_final.real,zeros_final.imag,'o',label='Zeros')
     ax.set_ylabel(r'$\mathfrak{Im}$')
     ax.set_ylabel(r'$\mathfrak{Re}$')
-
+    ax.grid()
+    plt.savefig('PoleandZeros.png')
 
 
     fig,(ax,ax1) = plt.subplots(2,layout='constrained')
-    ax.plot(losses)
+    if new_optimise:
+        ax.plot(losses)
     ax.set_xlabel('Iteration')
     ax.set_ylabel(r'$||\Delta d||_{2}^{2}$')
     for y,d in zip(Y_spectra,data_reconst):
