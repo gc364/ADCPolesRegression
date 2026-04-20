@@ -144,9 +144,11 @@ def calculate_transfer_function(poles,zeros,omega):
 def g(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequencies:np.ndarray,data_only=False):
     """The forward model for a list of spectra and frequencies"""
     ret = []
-    #   We only search for poles in the upper right quadrant, and append the remaining co
+    #   We only search for poles in the upper left quadrant, and append the remaining co
+    zeros = np.concatenate([zeros,np.conj(zeros)])
     poles = np.concatenate([poles,np.conj(poles)])
-    omega =2*np.pi*1j*frequencies
+    #   Do everything in rad/s and we have 
+    omega =2*np.pi*frequencies
     for X in X_spectra:
         num=np.ones_like(X,dtype=np.complex128)
         den = np.ones_like(X,dtype=np.complex128)
@@ -171,8 +173,8 @@ def jac(G,m,nzeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequen
     return G.T@(-g(poles,zeros,X_spectra,Y_spectra,frequencies))
 
 def model_update(m_last,nzeros,Qm,X_spectra,Y_spectra,frequencies):
-    zeros = m_last[:nzeros]
-    poles = m_last[nzeros:]
+    zeros = m_last[:nzeros//2]
+    poles = m_last[nzeros//2:]
     G = create_G(poles,zeros,X_spectra,Y_spectra,frequencies)
 
     H = hess(G)
@@ -183,9 +185,11 @@ def model_update(m_last,nzeros,Qm,X_spectra,Y_spectra,frequencies):
 
 def optimise(nz,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
     """Optimise for the poles and zeros"""
-    #   Choose a better starting point for the poles, perhaps a grid around the unit circle
-    poles = np.linspace(0.1,100,nz//2)+np.linspace(0j,100j,nz//2)
-    zeros = np.linspace(-100,100,nz)
+
+    poles = np.random.uniform(-2000,0,nz//2)+1j*np.random.uniform(0,2000,nz//2)#-np.linspace(0.1,100,nz//2)+np.linspace(0j,100j,nz//2)
+    zeros = np.random.uniform(-2000,2000,nz//2)+1j*np.random.uniform(0,2000,nz//2)#np.zeros(nz//2)#np.linspace(-100,100,nz)
+    #zeros[:nz//4] = 500*np.pi
+
     #   Zeros First, Poles second
     m0 = np.concatenate([zeros,poles])
     Qm = np.eye(poles.shape[0]+zeros.shape[0])*alpha
@@ -193,11 +197,16 @@ def optimise(nz,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
     losses = []
     for e in tqdm.tqdm(range(nepochs),desc = 'Optimising'):
         mi1 = model_update(mi,nz,Qm,X_spectra,Y_spectra,frequencies)
-        loss  = g(mi[nz:],mi[:nz].real,X_spectra,Y_spectra,frequencies)
+        loss  = g(mi[nz//2:],mi[:nz//2],X_spectra,Y_spectra,frequencies)
         losses.append(sum(loss**2)**0.5)
         mi = mi1
-        mi[:nz] = mi[:nz].real
-        mi[nz:] = abs(mi[nz:].real)+1j*mi[nz:].imag
+        # mi[:nz] = mi[:nz].real
+        #mi[nz//2:] = -abs(mi[nz//2:].real)+1j*mi[nz//2:].imag
+        poles_i = mi[nz//2:]
+        mask = poles_i.real > 0
+        poles_i[mask] = 0 +1j*poles_i[mask].imag
+        mi[nz//2:] = poles_i
+        
     m_post = mi
     return m_post,losses
 
@@ -233,24 +242,29 @@ def determine_nz(nzs,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
 
 def example_filter():
     coeffs = STAGE1_LINEAR
-    transfer_function = Polynomial(coeffs)
+    transfer_function = Polynomial(coeffs,domain=[0,6000])
+    transfer_function.roots()
     return 
+
+def main_lbfgs():
+    return
+
 def main():
     workdir = Path('/run/media/obic/SSD/test/ADC_Filter_0')
     nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
     pulses_path = workdir.joinpath('processed/pulses.txt')
     X_spectra,Y_spectra,frequencies  = load_xy(pulses_path,nc_path)
-    alpha = 1e-3
-    nepochs = 50
+    alpha = 1
+    nepochs = 100
     new_optimise = True
     if new_optimise:
         nzs = np.linspace(10,100,10,dtype=np.int64)
         #nz_optimum = determine_nz(nzs,X_spectra,Y_spectra,frequencies,100)
-        nz = 100 #nz_optimum
+        nz = 50 #nz_optimum
         m_post,losses = optimise(nz,X_spectra,Y_spectra,frequencies,nepochs,alpha)
-        poles_final = m_post[nz:]
-        zeros_final = m_post[:nz]
-        pandz = np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),zeros_final])
+        poles_final = m_post[nz//2:]
+        zeros_final = m_post[:nz//2]
+        pandz = np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),np.concatenate([zeros_final,np.conj(zeros_final)])])
         np.save('PolesandZeros.npy',pandz)
         C_post = calculate_C_posterior(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,alpha)
         np.save('PosteriorCovariance.npy',C_post)
@@ -264,12 +278,12 @@ def main():
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
         nz = zeros_final.shape[0]
-        data_reconst = g(poles_final[:nz//2],zeros_final,X_spectra,Y_spectra,frequencies,True)
+        data_reconst = g(poles_final[nz//2:],zeros_final[:nz//2],X_spectra,Y_spectra,frequencies,True)
 
     fig,ax = plt.subplots(2,layout='constrained')
-    H = calculate_transfer_function(poles_final,zeros_final,2*np.pi*1j*frequencies)
+    H = calculate_transfer_function(poles_final,zeros_final,2*np.pi*frequencies)
     print(H)
-    ax[0].plot(frequencies,H.real)
+    ax[0].plot(frequencies,H.real/(2*np.pi))
     ax[1].set_xlabel('Frequency (Hz)')
     ax[0].set_ylabel(r'$\mathfrak{R}$')
     ax[1].set_ylabel(r'$\mathfrak{I}$')
@@ -280,10 +294,17 @@ def main():
     fig,ax = plt.subplots(layout='constrained')
     ax.plot(poles_final.real,poles_final.imag,'x',label='Poles')
     ax.plot(zeros_final.real,zeros_final.imag,'o',label='Zeros')
-    ax.set_ylabel(r'$\mathfrak{Im}$')
-    ax.set_ylabel(r'$\mathfrak{Re}$')
+    ax.set_ylabel(r'$\mathfrak{Im} (rad/s)$')
+    ax.set_xlabel(r'$\mathfrak{Re} (rad/s)$')
     ax.grid()
     plt.savefig('PoleandZeros.png')
+    fig,ax = plt.subplots(layout='constrained')
+    ax.plot(poles_final.real/(2*np.pi),poles_final.imag/(2*np.pi),'x',label='Poles')
+    ax.plot(zeros_final.real/(2*np.pi),zeros_final.imag/(2*np.pi),'o',label='Zeros')
+    ax.set_ylabel(r'$\mathfrak{Im} (Hz)$')
+    ax.set_xlabel(r'$\mathfrak{Re} (Hz)$')
+    ax.grid()
+    plt.savefig('PoleandZerosHz.png')
 
 
     fig,(ax,ax1) = plt.subplots(2,layout='constrained')
