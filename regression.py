@@ -6,6 +6,7 @@ from pathlib import Path
 import tqdm
 from numpy.polynomial import Polynomial
 from filter_coeffs import *
+from scipy.optimize import minimize
 
 def load_pulses(pulses_path):
     pulses = np.loadtxt(pulses_path,delimiter='\t')
@@ -167,10 +168,11 @@ def hess(G):
     return G.T@G
 
 def jac(G,m,nzeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequencies:np.ndarray):
-    zeros = m[:nzeros]
-    poles = m[nzeros:]
+    zeros = m[:nzeros//2]
+    poles = m[nzeros//2:]
     
     return G.T@(-g(poles,zeros,X_spectra,Y_spectra,frequencies))
+
 
 def model_update(m_last,nzeros,Qm,X_spectra,Y_spectra,frequencies):
     zeros = m_last[:nzeros//2]
@@ -181,7 +183,6 @@ def model_update(m_last,nzeros,Qm,X_spectra,Y_spectra,frequencies):
     s = jac(G,m_last,nzeros,X_spectra,Y_spectra,frequencies)
     m_post  = m_last+ np.linalg.solve(H+Qm,s)
     return m_post
-
 
 def optimise(nz,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
     """Optimise for the poles and zeros"""
@@ -246,7 +247,130 @@ def example_filter():
     transfer_function.roots()
     return 
 
+
+def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies):
+    zeros = m[:nzeros//2] +  m[nzeros//2:nzeros]*1j
+    poles = m[nzeros:(3*nzeros)//2]+m[(3*nzeros)//2:]*1j
+    l = -g(poles,zeros,X_spectra,Y_spectra,frequencies)
+    return np.sqrt(l.__abs__()@l.__abs__().T)
+
+def jac_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies):
+    zeros = m[:nzeros//2] +  m[nzeros//2:nzeros]*1j
+    poles = m[nzeros:(3*nzeros)//2]+m[(3*nzeros)//2:]*1j
+    G = create_G(poles,zeros,X_spectra,Y_spectra,frequencies)
+    G = np.column_stack([G[:,:nzeros//2].real,G[:,:nzeros//2].imag,G[:,nzeros//2:].real,G[:,nzeros//2:].imag])
+
+    return G@np.ones(G.shape[1])
+
+def callback_lbfgs(intermediate_result):
+    print(intermediate_result)
+    print(f'Iteration Loss: {intermediate_result.fun}')
+    return
+
 def main_lbfgs():
+    workdir = Path('/run/media/obic/SSD/test/ADC_Filter_0')
+    nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
+    pulses_path = workdir.joinpath('processed/pulses.txt')
+    X_spectra,Y_spectra,frequencies  = load_xy(pulses_path,nc_path)
+    alpha = 1
+    nepochs = 100
+    new_optimise = True
+    if new_optimise:
+
+        nz = 100 
+        poles = np.concatenate([np.random.uniform(-2000,0,nz//2),np.random.uniform(0,2000,nz//2)])#-np.linspace(0.1,100,nz//2)+np.linspace(0j,100j,nz//2)
+        zeros = np.concatenate([np.random.uniform(-2000,2000,nz//2),np.random.uniform(0,2000,nz//2)])#np.zeros(nz//2)#np.linspace(-100,100,nz)
+        
+
+        m0 = np.concatenate([zeros,poles])
+        bounds_poles = [(None,0) for _ in range(nz//2)]
+        bounds_poles.append([(0,None) for _ in range(nz//2)])
+
+        bounds_zeros = [(None,None) for _ in range(nz//2)]
+        bounds_zeros.append([(0,None) for _ in range(nz//2)])
+
+        bounds = bounds_zeros.append(bounds_poles)
+        G0 = create_G(m0[nz:(3*nz)//2]+m0[(3*nz)//2:]*1j,m0[:nz//2] +  m0[nz//2:nz]*1j,X_spectra,Y_spectra,frequencies)
+        G0 = np.column_stack([G0[:,:nz//2].real,G0[:,:nz//2].imag,G0[:,nz//2:].real,G0[:,nz//2:].imag])
+
+        H0_inv = np.linalg.inv(G0.T@G0 + alpha*np.eye(G0.shape[1]))
+        fig,ax = plt.subplots(2)
+        ax[0].imshow(np.log10(H0_inv.real))
+        ax[1].imshow(np.triu(H0_inv.real)==np.tril(H0_inv.real).T)
+        plt.savefig('test.png')
+
+
+        res = minimize(
+                lambda m:objective_lbfgs(m,nz,X_spectra,Y_spectra,frequencies),
+                x0=m0,
+                jac = lambda m: jac_lbfgs(m,nz,X_spectra,Y_spectra,frequencies),
+                method='BFGS',  
+                bounds=bounds,
+                callback=callback_lbfgs,
+                options={'disp':True,
+                         'hess_inv0':H0_inv
+                         }      
+                )
+        m_post = res.x
+
+        poles_final = m_post[nz:(3*nz)//2]+1j*m_post[(3*nz)//2:]
+        zeros_final = m_post[:nz//2] + 1j*m_post[nz//2:nz]
+        pandz = np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),np.concatenate([zeros_final,np.conj(zeros_final)])])
+        np.save('PolesandZeros.npy',pandz)
+        C_post = calculate_C_posterior(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,alpha)
+        np.save('PosteriorCovariance.npy',C_post)
+        data_reconst = g(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,True)
+
+        poles_final = pandz[:,0]
+        zeros_final = pandz[:,1]
+    else:
+        C_post = np.load('PosteriorCovariance.npy')
+        pandz =  np.load('PolesandZeros.npy')
+        poles_final = pandz[:,0]
+        zeros_final = pandz[:,1]
+        nz = zeros_final.shape[0]
+        data_reconst = g(poles_final[nz//2:],zeros_final[:nz//2],X_spectra,Y_spectra,frequencies,True)
+
+    fig,ax = plt.subplots(2,layout='constrained')
+    H = calculate_transfer_function(poles_final,zeros_final,2*np.pi*frequencies)
+    print(H)
+    ax[0].plot(frequencies,H.real/(2*np.pi))
+    ax[1].set_xlabel('Frequency (Hz)')
+    ax[0].set_ylabel(r'$\mathfrak{R}$')
+    ax[1].set_ylabel(r'$\mathfrak{I}$')
+    ax[1].plot(frequencies,H.imag)
+    plt.savefig('Transfer_function.png')
+    plt.close()
+
+    fig,ax = plt.subplots(layout='constrained')
+    ax.plot(poles_final.real,poles_final.imag,'x',label='Poles')
+    ax.plot(zeros_final.real,zeros_final.imag,'o',label='Zeros')
+    ax.set_ylabel(r'$\mathfrak{Im} (rad/s)$')
+    ax.set_xlabel(r'$\mathfrak{Re} (rad/s)$')
+    ax.grid()
+    plt.savefig('PoleandZeros.png')
+    fig,ax = plt.subplots(layout='constrained')
+    ax.plot(poles_final.real/(2*np.pi),poles_final.imag/(2*np.pi),'x',label='Poles')
+    ax.plot(zeros_final.real/(2*np.pi),zeros_final.imag/(2*np.pi),'o',label='Zeros')
+    ax.set_ylabel(r'$\mathfrak{Im} (Hz)$')
+    ax.set_xlabel(r'$\mathfrak{Re} (Hz)$')
+    ax.grid()
+    plt.savefig('PoleandZerosHz.png')
+
+
+    fig,(ax,ax1) = plt.subplots(2,layout='constrained')
+
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel(r'$||\Delta d||_{2}^{2}$')
+    for y,d in zip(Y_spectra,data_reconst):
+        ax1.plot(frequencies,y,'r')
+        ax1.plot(frequencies,d,'k')
+    fig.savefig('losses.png')
+    plt.close()
+    fig,ax = plt.subplots(layout='constrained')
+    im = ax.imshow(C_post.real)
+    plt.colorbar(im,ax=ax,label='Posterior Variance')
+    plt.savefig('PosteriorCovar.png',dpi=256)
     return
 
 def main():
@@ -254,7 +378,7 @@ def main():
     nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
     pulses_path = workdir.joinpath('processed/pulses.txt')
     X_spectra,Y_spectra,frequencies  = load_xy(pulses_path,nc_path)
-    alpha = 1
+    alpha = .5
     nepochs = 100
     new_optimise = True
     if new_optimise:
@@ -288,6 +412,12 @@ def main():
     ax[0].set_ylabel(r'$\mathfrak{R}$')
     ax[1].set_ylabel(r'$\mathfrak{I}$')
     ax[1].plot(frequencies,H.imag)
+    ax[0].axvline(x=250)
+    ax[1].axvline(x=250)
+
+    ax[0].loglog()
+    ax[1].loglog()
+    
     plt.savefig('Transfer_function.png')
     plt.close()
 
