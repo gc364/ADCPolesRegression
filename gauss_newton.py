@@ -90,7 +90,8 @@ def optimise(nz,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
 
         poles_i,zeros_i = sort_model_vector(mi1,nz,poles_and_zeros=True)
         loss  = g(poles_i,zeros_i,X_spectra,Y_spectra,frequencies)
-        losses.append(sum(loss**2)**0.5)
+        print(sum(loss.__abs__()**2)**0.5)
+        losses.append(sum(loss.__abs__()**2)**0.5)
         mi = mi1
         mask = poles_i.real > 0
         poles_i[mask] = 0 +1j*poles_i[mask].imag
@@ -143,10 +144,10 @@ def main():
     pulses_path = workdir.joinpath('processed/pulses.txt')
     X_spectra,Y_spectra,frequencies  = load_xy(pulses_path,nc_path)
     alpha = .1
-    nepochs = 50
+    nepochs = 100
     new_optimise = True
     if new_optimise:
-        nz = 50 
+        nz = 70 
         m_post,losses = optimise(nz,X_spectra,Y_spectra,frequencies,nepochs,alpha)
         poles_final,zeros_final = sort_model_vector(m_post,nz,poles_and_zeros=True)
 

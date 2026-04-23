@@ -7,7 +7,8 @@ import tqdm
 from numpy.polynomial import Polynomial
 from filter_coeffs import *
 from scipy.optimize import minimize
-
+import numpy.polynomial.polynomial as poly
+from scipy.signal import freqs_zpk
 
 
 def load_pulses(pulses_path):
@@ -29,6 +30,24 @@ def plot_xy(X_spec,Y_spec,frequencies,nplots=4,outfile='data_test.png'):
     ax[nplots-1,0].set_xlabel('Frequency (Hz)')
     ax[nplots-1,1].set_xlabel('Frequency (Hz)')    
     plt.savefig(outfile,dpi=256)
+
+def to_coefficents(poles,zeros):
+    """Convert poles and zeros to numerator and denominator coefficients"""
+    num = poly.polyfromroots(zeros)
+    den = poly.polyfromroots(poles)
+
+    return num,den
+
+def scipy_frequency_response(poles,zeros,frequencies=None,gain=1):
+    """Compute the frequency response using scipy"""
+    if type(frequencies) == None:
+        w,H = freqs_zpk(zeros,poles,gain,worN=1500,fs=2*np.pi*500)
+        
+        return w,H
+    w,H = freqs_zpk(zeros,poles,gain,frequencies)
+  
+    return w,H
+
 
 def cut_timeseries(y,chattr,start_times,length_seconds):
     dataset_start_time = chattr['data_start']
@@ -127,7 +146,7 @@ def g(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequenc
     zeros = np.concatenate([zeros,np.conj(zeros)])
     poles = np.concatenate([poles,np.conj(poles)])
     #   Do everything in rad/s and we have 
-    omega =2*np.pi*frequencies
+    omega =2*np.pi*frequencies*1j
     for X in X_spectra:
         num=np.ones_like(X,dtype=np.complex128)
         den = np.ones_like(X,dtype=np.complex128)
@@ -136,6 +155,23 @@ def g(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequenc
             den *= (omega-ma)
         
         ret.append((num/den)*X)
+    ret = data_transform(ret)
+    if data_only:
+        return ret
+    ret = [L2_norm(d_obs,d) for d_obs,d in zip(Y_spectra,ret)]
+    return np.array(ret)
+
+def g_scipy(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequencies:np.ndarray,data_only=False):
+    """The forward model for a list of spectra and frequencies"""
+    ret = []
+    #   We only search for poles in the upper left quadrant, and append the remaining co
+    zeros = np.concatenate([zeros,np.conj(zeros)])
+    poles = np.concatenate([poles,np.conj(poles)])
+    w,h  = scipy_frequency_response(poles,zeros,2*np.pi*frequencies)
+ 
+    ret = []
+    for x in X_spectra:
+        ret.append(h*x)
     ret = data_transform(ret)
     if data_only:
         return ret

@@ -10,40 +10,49 @@ from scipy.optimize import minimize
 from shared import *
 
 FIGPATH = 'figures/bfgs'
-def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies):
+
+
+
+def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,scipy=False):
+
     zeros = m[:nzeros//2] +  m[nzeros//2:nzeros]*1j
     poles = m[nzeros:(3*nzeros)//2]+m[(3*nzeros)//2:]*1j
-    l = -g(poles,zeros,X_spectra,Y_spectra,frequencies)
+    if scipy == False:
+        l  = -g(poles,zeros,X_spectra,Y_spectra,frequencies)
+    else:
+        l = -g_scipy(poles,zeros,X_spectra,Y_spectra,frequencies)
     return np.sqrt(l.__abs__()@l.__abs__().T)
 
-def jac_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies):
+def jac_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,scipy=False):
     g = np.zeros_like(m)
     eps = 1e-5
     for i in range(m.shape[0]):
         mn = m.copy()
         mn[i]-= eps
-        lower = objective_lbfgs(mn,nzeros,X_spectra,Y_spectra,frequencies)
+        lower = objective_lbfgs(mn,nzeros,X_spectra,Y_spectra,frequencies,scipy=scipy)
         mp = m.copy()
         mp[i]+= eps
-        upper = objective_lbfgs(mp,nzeros,X_spectra,Y_spectra,frequencies)
+        upper = objective_lbfgs(mp,nzeros,X_spectra,Y_spectra,frequencies,scipy=scipy)
 
         g[i] = (upper-lower)/eps
 
     return g
 
 def callback_lbfgs(intermediate_result):
-    print(intermediate_result)
     print(f'Iteration Loss: {intermediate_result.fun}')
     return
 
+
+
 def main_lbfgs():
+
     workdir = Path('/run/media/obic/SSD/test/ADC_Filter_0')
     nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
     pulses_path = workdir.joinpath('processed/pulses.txt')
     X_spectra,Y_spectra,frequencies  = load_xy(pulses_path,nc_path)
     alpha = 1
-    nepochs = 100
-    new_optimise = True
+    nepochs = 50
+    new_optimise = False
     if new_optimise:
 
         nz = 70 
@@ -59,41 +68,40 @@ def main_lbfgs():
         bounds_zeros.append([(0,None) for _ in range(nz//2)])
 
         bounds = bounds_zeros.append(bounds_poles)
-    
 
         res = minimize(
-                lambda m:objective_lbfgs(m,nz,X_spectra,Y_spectra,frequencies),
+                lambda m:objective_lbfgs(m,nz,X_spectra,Y_spectra,frequencies,scipy=True),
                 x0=m0,
-                jac = lambda m: jac_lbfgs(m,nz,X_spectra,Y_spectra,frequencies),
-                method='BFGS',  
+                jac = lambda m: jac_lbfgs(m,nz,X_spectra,Y_spectra,frequencies,scipy=True),
+                method='L-BFGS-B',  
                 bounds=bounds,
                 callback=callback_lbfgs,
                 options={'disp':True,
-                         'maxiter':100
+                         'maxiter':nepochs
                          }      
                 )
+
         m_post = res.x
 
         poles_final = m_post[nz:(3*nz)//2]+1j*m_post[(3*nz)//2:]
         zeros_final = m_post[:nz//2] + 1j*m_post[nz//2:nz]
         pandz = np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),np.concatenate([zeros_final,np.conj(zeros_final)])])
-        np.save('PolesandZeros.npy',pandz)
+        np.save(f'{FIGPATH}/PolesandZeros.npy',pandz)
 
         data_reconst = g(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,True)
 
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
     else:
-        C_post = np.load('PosteriorCovariance.npy')
-        pandz =  np.load('PolesandZeros.npy')
+       
+        pandz =  np.load(f'{FIGPATH}/PolesandZeros.npy')
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
         nz = zeros_final.shape[0]
-        data_reconst = g(poles_final[nz//2:],zeros_final[:nz//2],X_spectra,Y_spectra,frequencies,True)
+        data_reconst = g_scipy(poles_final[nz//2:],zeros_final[:nz//2],X_spectra,Y_spectra,frequencies,True)
 
     fig,ax = plt.subplots(2,layout='constrained')
     H = calculate_transfer_function(poles_final,zeros_final,2*np.pi*frequencies)
-    print(H)
     ax[0].plot(frequencies,H.real/(2*np.pi))
     ax[1].set_xlabel('Frequency (Hz)')
     ax[0].set_ylabel(r'$\mathfrak{R}$')
@@ -124,14 +132,30 @@ def main_lbfgs():
     ax.set_xlabel('Iteration')
     ax.set_ylabel(r'$||\Delta d||_{2}^{2}$')
     for y,d in zip(Y_spectra,data_reconst):
-        ax1.plot(frequencies,y,'r')
-        ax1.plot(frequencies,d,'k')
+        ax1.plot(frequencies,10**y,'r')
+        ax1.plot(frequencies,10**d,'k')
+    ax1.loglog()
     fig.savefig(f'{FIGPATH}/losses.png')
     plt.close()
-    fig,ax = plt.subplots(layout='constrained')
-    im = ax.imshow(C_post.real)
-    plt.colorbar(im,ax=ax,label='Posterior Variance')
-    plt.savefig(f'{FIGPATH}/PosteriorCovar.png',dpi=256)
+
+    w,h = scipy_frequency_response(poles_final,zeros_final,frequencies)
+    fig,(ax,ax1) = plt.subplots(2)
+    ax.plot(w,h.real)
+    ax.plot(w,(h*X_spectra[0]).real)
+    ax1.plot(w,h.imag)
+    ax.loglog()
+
+    plt.savefig(f'{FIGPATH}/scipyFreqz.png')
+
+    fig,ax = plt.subplots()
+    phase = np.angle(h)
+    ax.plot(2*np.pi*w,phase)
+    ax.set_xlabel(r'$\omega$ (radians)')
+    ax.set_ylabel(r'$\Phi$ (radians)')
+    ax.semilogx()
+    plt.savefig(f'{FIGPATH}/phase_repsonse.png')
+
+    print(to_coefficents(poles_final,zeros_final)[0])
     return
 
 if __name__ == '__main__':
