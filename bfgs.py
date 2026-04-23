@@ -46,12 +46,12 @@ def callback_lbfgs(intermediate_result):
 
 def main_lbfgs():
 
-    workdir = Path('/run/media/obic/SSD/test/ADC_Filter_0')
+    workdir = Path('/run/media/obic/SSD/test/ADC_Filter_1')
     nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
     pulses_path = workdir.joinpath('processed/pulses.txt')
     X_spectra,Y_spectra,frequencies  = load_xy(pulses_path,nc_path)
     alpha = 1
-    nepochs = 50
+    nepochs = 100
     new_optimise = False
     if new_optimise:
 
@@ -61,7 +61,7 @@ def main_lbfgs():
         
 
         m0 = np.concatenate([zeros,poles])
-        bounds_poles = [(None,0) for _ in range(nz//2)]
+        bounds_poles = [(-10000,0) for _ in range(nz//2)]
         bounds_poles.append([(0,None) for _ in range(nz//2)])
 
         bounds_zeros = [(None,None) for _ in range(nz//2)]
@@ -80,9 +80,9 @@ def main_lbfgs():
                          'maxiter':nepochs
                          }      
                 )
-
+        print(res)
         m_post = res.x
-
+        
         poles_final = m_post[nz:(3*nz)//2]+1j*m_post[(3*nz)//2:]
         zeros_final = m_post[:nz//2] + 1j*m_post[nz//2:nz]
         pandz = np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),np.concatenate([zeros_final,np.conj(zeros_final)])])
@@ -155,7 +155,7 @@ def main_lbfgs():
     ax.semilogx()
     plt.savefig(f'{FIGPATH}/phase_repsonse.png')
 
-    print(to_coefficents(poles_final,zeros_final)[0])
+    create_nice_figures(poles_final,zeros_final,X_spectra,Y_spectra)
     return
 
 if __name__ == '__main__':

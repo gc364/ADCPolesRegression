@@ -177,3 +177,139 @@ def g_scipy(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],fr
         return ret
     ret = [L2_norm(d_obs,d) for d_obs,d in zip(Y_spectra,ret)]
     return np.array(ret)
+
+NICE_FIGURES = Path('./figures/nice_figures')
+def create_nice_figures(poles,zeros,X_spectra,Y_spectra):
+    NICE_FIGURES.mkdir(exist_ok=True)
+    mask =poles.real > 0
+    poles[mask] = abs(poles[mask].real)+1j*poles[mask].imag
+    b,a = to_coefficents(poles,zeros)
+
+    b_norm,a_norm = scipy.signal.normalize(b,a)
+  
+    poles_norm = poly.polyroots(a_norm)
+    zeros_norm = poly.polyroots(b_norm)
+
+    frequencies_hz = np.logspace(-3,3,5000)
+    frequencies_rad = frequencies_hz*2*np.pi
+    _,H = scipy_frequency_response(poles,zeros,frequencies_rad)
+    phase = np.angle(H)
+    fig,ax  = plt.subplots(2,layout='constrained')
+    ax[0].plot(frequencies_rad,20*np.log10(H))
+    ax[0].semilogx()
+    ax[0].set_xlabel(r'$\omega$ (rad/s)')
+    ax[0].set_ylabel(r'Response (dB)')
+    ax[1].plot(frequencies_rad,phase)
+    ax[1].semilogx()
+    ax[1].set_xlabel(r'$\omega$ (rad/s)')
+    ax[1].set_ylabel(r'Phase (rad)')
+    plt.savefig(NICE_FIGURES.joinpath('frequency_response.png'),dpi=256)
+
+
+    fig,ax  = plt.subplots(2,layout='constrained')
+    ax[0].plot(frequencies_hz,20*np.log10(H))
+    ax[0].semilogx()
+    ax[0].set_xlabel(r'$f$ (Hz)')
+    ax[0].set_ylabel(r'Response (dB)')
+    ax[1].plot(frequencies_hz,phase)
+    ax[1].semilogx()
+    ax[1].set_xlabel(r'$f$ (Hz)')
+    ax[1].set_ylabel(r'Phase (rad)')
+    plt.savefig(NICE_FIGURES.joinpath('frequency_response_hz.png'),dpi=256)
+
+  
+    times = np.linspace(0,frequencies_hz.shape[0],frequencies_hz.shape[0])
+    t,impulse = scipy.signal.impulse((b_norm,a_norm),T=times)
+    fig,(ax,ax1) = plt.subplots(2,layout='constrained')
+    ax.plot(t,impulse)
+    ax.set_xlabel('samples')
+    ax.set_ylabel('Impulse Response')
+
+    t,step = scipy.signal.step((b_norm,a_norm),T=times)
+
+    ax1.plot(t,step)
+    ax1.set_xlabel('samples')
+    ax1.set_ylabel('Step Response')
+    plt.savefig(NICE_FIGURES.joinpath('impulse_step_response.png'),dpi=256)
+
+
+    fig,ax = plt.subplots(2,layout='constrained')
+    b_cumulative  = np.cumsum(b_norm.__abs__())
+    b_cumulative *= 1/b_cumulative.max()
+    ax[0].plot(np.abs(b_norm.real))
+    ax[0].semilogy()
+    
+    a_cumulative  = np.cumsum(a_norm.__abs__())
+    a_cumulative *= 1/a_cumulative.max()
+    ax[1].plot(np.abs(a_norm.real))
+    ax[1].semilogy()
+
+    ax[0].set_ylabel('Numerator Coefficents')
+    ax[1].set_ylabel('Denomimator Coefficents')     
+    plt.savefig(NICE_FIGURES.joinpath('coefficient_spectra.png')  )
+
+
+    fig,ax = plt.subplots(layout='constrained')
+    _,group_delay = scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
+    ax.plot(frequencies_hz,group_delay)
+    ax.set_xlabel('Frequency (Hz)')
+    ax.set_ylabel('Group Delay (s)')
+    plt.savefig(NICE_FIGURES.joinpath('group_delay.png'),dpi=256)
+
+    #   THD at 31.25 Hz signal
+    #   Put a 31.25 Hz signal through the filter then look at the calculate the fundamen
+    thds = []
+    f_tests = [31.25]#np.logspace(-2,2,20)
+    for f in f_tests:
+        t = np.arange(0,1000,1/500)
+        x = np.sin(2*np.pi*f*t)
+        X = np.fft.rfft(x)
+        sort_ind = np.argsort(X.__abs__())
+        harmonics = X[sort_ind][-6:]   #   the top feq peaks
+       
+        thd = np.sum(harmonics[:-1].__abs__())/harmonics[-1].__abs__()
+        thds.append(20*np.log10(thd))
+        
+    fig,ax = plt.subplots()
+    ax.plot(f_tests,thds)
+    ax.set_ylabel('THD (dB)')
+    ax.set_xlabel('Frequency (Hz)')
+    plt.savefig(NICE_FIGURES.joinpath('THD_synthetic.png'))
+
+    thds = []
+
+    for X in X_spectra:
+        sort_ind = np.argsort(X.__abs__())
+        harmonics = X[sort_ind][-256:]   #   the top feq peaks
+        thd = np.sum(harmonics[:-1].__abs__())/harmonics[-1].__abs__()
+        thds.append(20*np.log10(thd))
+        
+    fig,ax = plt.subplots()
+    ax.plot(range(1,len(thds)+1),thds)
+    ax.set_ylabel('THD (dB)')
+    ax.set_xlabel('Sample')
+    plt.savefig(NICE_FIGURES.joinpath('THD_observed.png'))
+
+
+
+    #   Circular poles and zeros
+    print(poles.max())
+    print(zeros.max())
+    print(poles.min())
+    print(zeros.min())
+    zeros_arg = np.abs(zeros)
+    poles_arg = np.abs(poles)
+    zeros_c = np.exp(1j*np.angle(zeros))
+    poles_c = np.exp(1j*np.angle(poles))
+
+    
+
+    fig,ax = plt.subplots()
+    ax.plot(zeros_c.real,zeros_c.imag,'o')
+    ax.plot(poles_c.real,poles_c.imag,'x')
+    ax.grid()
+    f_obs = 31.25
+    f_obs_c = np.exp(1j*f_obs*2*np.pi)
+    ax.plot(f_obs_c.real,f_obs_c.imag,'*')
+    plt.savefig(NICE_FIGURES.joinpath('unit_poles.png'),dpi=256)
+    return
