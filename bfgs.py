@@ -45,29 +45,57 @@ def callback_lbfgs(intermediate_result):
 
 
 def main_lbfgs():
-
-    workdir = Path('/run/media/obic/SSD/test/ADC_Filter_1')
+    #   The log-spaced samples
+    workdir = Path('/run/media/obic/SSD/test/ADC_Filter_2')
     nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
     pulses_path = workdir.joinpath('processed/pulses.txt')
     X_spectra,Y_spectra,frequencies  = load_xy(pulses_path,nc_path)
+    pulses = load_pulses(pulses_path)
+    #   The uniform random samples
+    workdir = Path('/run/media/obic/SSD/test/ADC_Filter_3')
+    nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
+    pulses_path = workdir.joinpath('processed/pulses.txt')
+    X_spectra1,Y_spectra1,_  = load_xy(pulses_path,nc_path)
+    pulses1 = load_pulses(pulses_path)
+
+    #   The harmonic samples
+    workdir = Path('/run/media/obic/SSD/test/ADC_Filter_4')
+    nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
+    pulses_path = workdir.joinpath('processed/pulses.txt')
+    X_spectra2,Y_spectra2,_  = load_xy(pulses_path,nc_path)
+    pulses2 = load_pulses(pulses_path)
+    
+    X_spectra+= X_spectra1+X_spectra2
+    Y_spectra+=Y_spectra1+Y_spectra2
+    #frequencies = np.concatenate([frequencies,frequ])
+    pulses = np.vstack([pulses,pulses1])
+
+
     alpha = 1
     nepochs = 100
-    new_optimise = False
+    new_optimise = True
     if new_optimise:
 
         nz = 70 
+
+        ###########################################
+        #       BOUNDS      #
+        #   If these are all within the unit circle its a minimum phase filter
+        #   If symmetric across the real axis and all poles is top left quandrant its a FIR filter
+        #   
+        #   Essentially these are the most important but for choosing what type of filter we get out
+        #   We can partition these into regressing for multiple filter stages
         poles = np.concatenate([np.random.uniform(-2000,0,nz//2),np.random.uniform(0,2000,nz//2)])#-np.linspace(0.1,100,nz//2)+np.linspace(0j,100j,nz//2)
         zeros = np.concatenate([np.random.uniform(-2000,2000,nz//2),np.random.uniform(0,2000,nz//2)])#np.zeros(nz//2)#np.linspace(-100,100,nz)
-        
-
         m0 = np.concatenate([zeros,poles])
-        bounds_poles = [(-10000,0) for _ in range(nz//2)]
-        bounds_poles.append([(0,None) for _ in range(nz//2)])
-
+        bounds_poles = [(None,0) for _ in range(nz//2)]
+        bounds_poles+=[(0,None) for _ in range(nz//2)]
         bounds_zeros = [(None,None) for _ in range(nz//2)]
-        bounds_zeros.append([(0,None) for _ in range(nz//2)])
+        bounds_zeros+=[(0,None) for _ in range(nz//2)]
+        bounds = bounds_zeros + bounds_poles
 
-        bounds = bounds_zeros.append(bounds_poles)
+        ######################################
+
 
         res = minimize(
                 lambda m:objective_lbfgs(m,nz,X_spectra,Y_spectra,frequencies,scipy=True),
@@ -77,7 +105,8 @@ def main_lbfgs():
                 bounds=bounds,
                 callback=callback_lbfgs,
                 options={'disp':True,
-                         'maxiter':nepochs
+                         'maxiter':nepochs,
+                         'ftol':1e-3
                          }      
                 )
         print(res)
@@ -155,7 +184,7 @@ def main_lbfgs():
     ax.semilogx()
     plt.savefig(f'{FIGPATH}/phase_repsonse.png')
 
-    create_nice_figures(poles_final,zeros_final,X_spectra,Y_spectra)
+    create_nice_figures(poles_final,zeros_final,X_spectra,Y_spectra,nc_path,pulses,frequencies)
     return
 
 if __name__ == '__main__':

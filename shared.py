@@ -9,7 +9,7 @@ from filter_coeffs import *
 from scipy.optimize import minimize
 import numpy.polynomial.polynomial as poly
 from scipy.signal import freqs_zpk
-
+from datetime import datetime
 
 def load_pulses(pulses_path):
     pulses = np.loadtxt(pulses_path,delimiter='\t')
@@ -153,8 +153,11 @@ def g(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequenc
         for ma,mb in zip(poles,zeros):
             num *=(omega-mb)
             den *= (omega-ma)
-        
-        ret.append((num/den)*X)
+        spec = (num/den)*X
+        #   zero anything past nyqvist
+        ind = np.argmin(abs(frequencies-250))
+        spec[ind:] = 0
+        ret.append(spec)
     ret = data_transform(ret)
     if data_only:
         return ret
@@ -171,18 +174,28 @@ def g_scipy(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],fr
  
     ret = []
     for x in X_spectra:
-        ret.append(h*x)
+        spec = h*x
+        #   zero anything past nyqvist
+        ind = np.argmin(abs(frequencies-250))
+        spec[ind:] = 0
+        ret.append(spec)
     ret = data_transform(ret)
     if data_only:
         return ret
     ret = [L2_norm(d_obs,d) for d_obs,d in zip(Y_spectra,ret)]
     return np.array(ret)
 
+
+def compute_group_delay(phase,frequencies):
+    
+    return np.diff(phase)/np.diff(frequencies)
+
+
 NICE_FIGURES = Path('./figures/nice_figures')
-def create_nice_figures(poles,zeros,X_spectra,Y_spectra):
+def create_nice_figures(poles,zeros,X_spectra,Y_spectra,nc_path,pulses,data_frequencies):
     NICE_FIGURES.mkdir(exist_ok=True)
     mask =poles.real > 0
-    poles[mask] = abs(poles[mask].real)+1j*poles[mask].imag
+    poles[mask] = -abs(poles[mask].real)+1j*poles[mask].imag
     b,a = to_coefficents(poles,zeros)
 
     b_norm,a_norm = scipy.signal.normalize(b,a)
@@ -236,12 +249,12 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra):
     fig,ax = plt.subplots(2,layout='constrained')
     b_cumulative  = np.cumsum(b_norm.__abs__())
     b_cumulative *= 1/b_cumulative.max()
-    ax[0].plot(np.abs(b_norm.real))
+    ax[0].plot(np.abs(b_norm))
     ax[0].semilogy()
     
     a_cumulative  = np.cumsum(a_norm.__abs__())
     a_cumulative *= 1/a_cumulative.max()
-    ax[1].plot(np.abs(a_norm.real))
+    ax[1].plot(np.abs(b_norm))
     ax[1].semilogy()
 
     ax[0].set_ylabel('Numerator Coefficents')
@@ -251,9 +264,12 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra):
 
     fig,ax = plt.subplots(layout='constrained')
     _,group_delay = scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
-    ax.plot(frequencies_hz,group_delay)
+    group_delay = compute_group_delay(phase,frequencies_rad)
+    inds = group_delay <=0
+    print(group_delay)
+    ax.plot(frequencies_hz[1:][inds],group_delay[inds])
     ax.set_xlabel('Frequency (Hz)')
-    ax.set_ylabel('Group Delay (s)')
+    ax.set_ylabel('Group Delay (s/rad)')
     plt.savefig(NICE_FIGURES.joinpath('group_delay.png'),dpi=256)
 
     #   THD at 31.25 Hz signal
@@ -271,26 +287,56 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra):
         thds.append(20*np.log10(thd))
         
     fig,ax = plt.subplots()
-    ax.plot(f_tests,thds)
+    ax.plot(f_tests,thds,'r*')
     ax.set_ylabel('THD (dB)')
     ax.set_xlabel('Frequency (Hz)')
     plt.savefig(NICE_FIGURES.joinpath('THD_synthetic.png'))
 
+
+    input_freqs = pulses[:,1]
+    sorted_freq_ind = np.argsort(input_freqs)
+    
+
     thds = []
 
-    for X in X_spectra:
+    for f,X in zip(input_freqs,X_spectra):
+
+        nyq_ind = np.argmin(abs(data_frequencies-250))
+
+        X[nyq_ind:] = 0
+
         sort_ind = np.argsort(X.__abs__())
-        harmonics = X[sort_ind][-256:]   #   the top feq peaks
+        sort_ind,_ = scipy.signal.find_peaks(X)
+       
+        harmonics = X[sort_ind] 
+        harmonics =np.sort( harmonics[-32:].__abs__() )
         thd = np.sum(harmonics[:-1].__abs__())/harmonics[-1].__abs__()
+        thd = thd/np.sqrt(1+thd**2)
+
         thds.append(20*np.log10(thd))
         
     fig,ax = plt.subplots()
-    ax.plot(range(1,len(thds)+1),thds)
+    ax.plot(input_freqs[sorted_freq_ind],np.array(thds)[sorted_freq_ind])
     ax.set_ylabel('THD (dB)')
-    ax.set_xlabel('Sample')
-    plt.savefig(NICE_FIGURES.joinpath('THD_observed.png'))
+    ax.set_xlabel('Input Freq (Hz)')
+    plt.savefig(NICE_FIGURES.joinpath('THD_observed_X.png'))
+    thds = []
+    for X in Y_spectra:
+        X = 10**X
+        sort_ind,_ = scipy.signal.find_peaks(X)
+       
+        harmonics = X[sort_ind] 
+        harmonics =np.sort( harmonics[-32:].__abs__() )
+        thd = np.sum(harmonics[:-1].__abs__())/harmonics[-1].__abs__()
+        thd = thd/np.sqrt(1+thd**2)
+        thds.append(20*np.log10(thd))
+        
+    fig,ax = plt.subplots()
 
-
+    ax.plot(input_freqs[sorted_freq_ind],np.array(thds)[sorted_freq_ind])
+    ax.set_ylabel('THD (dB)')
+    ax.set_xlabel('Input Freq (Hz)')
+    plt.savefig(NICE_FIGURES.joinpath('THD_observed_Y.png'))
 
     #   Circular poles and zeros
     print(poles.max())
@@ -312,4 +358,63 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra):
     f_obs_c = np.exp(1j*f_obs*2*np.pi)
     ax.plot(f_obs_c.real,f_obs_c.imag,'*')
     plt.savefig(NICE_FIGURES.joinpath('unit_poles.png'),dpi=256)
+
+
+
+    #   SNR 
+    #   We need to look for the level of noise with no signal
+    #   migth be best to just read somthing at 30s past the minute in the nc files
+    #   Then fft and do 10log(P_sig/P_noise)
+  
+    dataset = nc.Dataset(nc_path,'r')
+  
+    var = dataset.variables['ch02']
+    sample_rate = var.__dict__['sample_rate_hz']
+    start_time =  var.__dict__['data_start']
+    end_time =  var.__dict__['data_end']
+
+    noise_start =datetime.fromtimestamp(start_time + ((end_time-start_time)*3/4))
+    noise_start = datetime(noise_start.year,
+                           noise_start.month,
+                           noise_start.day,
+                           noise_start.hour,
+                           noise_start.minute
+                           ).timestamp()+30
+    noise_end = noise_start+20
+
+    start_ind = int((noise_start-start_time)*sample_rate)
+    end_ind = int((noise_end-start_time)*sample_rate)
+    noise = var[start_ind:end_ind]
+    noise_prime = np.fft.rfft(noise,n = 6000)
+    noise_freqs = np.fft.rfftfreq(n=6000,d=1/sample_rate)
+
+    target_high = 1500  
+    df_y = noise_freqs[1]-noise_freqs[0]
+    max_f = noise_freqs.max()
+    pad_number = int((target_high - max_f)/df_y)
+    noise_freqs = np.concatenate([noise_freqs,np.linspace(max_f,target_high,pad_number)])
+    noise_prime = np.concatenate([noise_prime,np.zeros(pad_number)]) 
+    noise_prime = data_transform(noise_prime)
+    
+
+
+    snr = 10*(Y_spectra[0]-noise_prime)
+    fig,ax = plt.subplots(layout='constrained')
+    ax.plot(noise_freqs,snr)
+
+    ax.set_ylabel('SNR (dB)')
+    ax.set_xlabel('Frequency (Hz)')
+    plt.savefig(f'{NICE_FIGURES}/SNR.png',dpi=256)
+
+    #   Look at multiples of the input signal and the sampling rate for harmonic imperfections
+    
+    fig,ax = plt.subplots()
+    ind = 30
+    ax.plot(noise_freqs,Y_spectra[ind])
+    for i in range(1,10):
+        ax.axvline(x = input_freqs[ind]*i)
+    ax.set_xlim(0,250)
+    plt.savefig(f'{NICE_FIGURES}/SFDR.png')
+
+  
     return
