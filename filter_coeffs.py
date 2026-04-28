@@ -1,5 +1,12 @@
 import numpy as np
 
+
+
+F_CLK_HIGH = 8.192e6  # Hz – high/mid power mode
+F_CLK_LOW = 4.096e6  # Hz – low power mode
+F_MOD_HIGH = F_CLK_HIGH / 4  # 2.048 MHz
+F_MOD_LOW = F_CLK_LOW / 4  # 1.024 MHz
+
 STAGE1_LINEAR = np.array([3, 0, -25, 0, 150, 256, 150, 0, -25, 0, 3], dtype=float) / 512.0
 
 STAGE2_LINEAR = (

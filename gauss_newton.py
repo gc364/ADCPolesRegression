@@ -28,7 +28,7 @@ def create_G(poles,zeros,X_spectra,Y_spectra,frequencies):
         
         poles1,bp = sort_model_vector(np.concatenate([bp,poles]),nz,poles_and_zeros=True)
         poles1,bn = sort_model_vector(np.concatenate([bn,poles]),nz,poles_and_zeros=True)
-        diff = (g(poles1,bp,X_spectra,Y_spectra,frequencies)-g(poles1,bn,X_spectra,Y_spectra,frequencies))/eps
+        diff = (g_scipy(poles1,bp,X_spectra,Y_spectra,frequencies)-g_scipy(poles1,bn,X_spectra,Y_spectra,frequencies))/eps
         G[:,m] = diff
 
     for m in range(poles.shape[0]):
@@ -41,7 +41,7 @@ def create_G(poles,zeros,X_spectra,Y_spectra,frequencies):
         ap,zeros1 = sort_model_vector(np.concatenate([zeros,ap]),nz,poles_and_zeros=True)
         an,zeros1 = sort_model_vector(np.concatenate([zeros,an]),nz,poles_and_zeros=True)
 
-        diff = (g(ap,zeros1,X_spectra,Y_spectra,frequencies)-g(an,zeros1,X_spectra,Y_spectra,frequencies))/eps
+        diff = (g_scipy(ap,zeros1,X_spectra,Y_spectra,frequencies)-g_scipy(an,zeros1,X_spectra,Y_spectra,frequencies))/eps
 
         G[:,zeros.shape[0]+m] = diff
     return G
@@ -54,7 +54,7 @@ def jac(G,m,nzeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequen
 
     poles,zeros = sort_model_vector(m,nzeros,poles_and_zeros=True)
     
-    return G.T@(-g(poles,zeros,X_spectra,Y_spectra,frequencies))
+    return G.T@(-g_scipy(poles,zeros,X_spectra,Y_spectra,frequencies))
 
 
 def model_update(m_last,nzeros,Qm,X_spectra,Y_spectra,frequencies):
@@ -89,7 +89,7 @@ def optimise(nz,X_spectra,Y_spectra,frequencies,nepochs=100,alpha=1e-2):
         mi1 = model_update(mi,nz,Qm,X_spectra,Y_spectra,frequencies)
 
         poles_i,zeros_i = sort_model_vector(mi1,nz,poles_and_zeros=True)
-        loss  = g(poles_i,zeros_i,X_spectra,Y_spectra,frequencies)
+        loss  = g_scipy(poles_i,zeros_i,X_spectra,Y_spectra,frequencies)
         print(sum(loss.__abs__()**2)**0.5)
         losses.append(sum(loss.__abs__()**2)**0.5)
         mi = mi1
@@ -139,10 +139,30 @@ def example_filter():
 
 
 def main():
-    workdir = Path('/run/media/obic/SSD/test/ADC_Filter_0')
+    #   The log-spaced samples
+    workdir = Path('/run/media/obic/SSD/test/ADC_Filter_2')
     nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
     pulses_path = workdir.joinpath('processed/pulses.txt')
     X_spectra,Y_spectra,frequencies  = load_xy(pulses_path,nc_path)
+    pulses = load_pulses(pulses_path)
+    #   The uniform random samples
+    workdir = Path('/run/media/obic/SSD/test/ADC_Filter_3')
+    nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
+    pulses_path = workdir.joinpath('processed/pulses.txt')
+    X_spectra1,Y_spectra1,_  = load_xy(pulses_path,nc_path)
+    pulses1 = load_pulses(pulses_path)
+
+    #   The harmonic samples
+    workdir = Path('/run/media/obic/SSD/test/ADC_Filter_4')
+    nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
+    pulses_path = workdir.joinpath('processed/pulses.txt')
+    X_spectra2,Y_spectra2,_  = load_xy(pulses_path,nc_path)
+    pulses2 = load_pulses(pulses_path)
+    
+    X_spectra+= X_spectra1#+X_spectra2
+    Y_spectra+=Y_spectra1#+Y_spectra2
+
+
     alpha = .1
     nepochs = 100
     new_optimise = True
