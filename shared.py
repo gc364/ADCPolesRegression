@@ -325,12 +325,19 @@ def compute_group_delay(phase,frequencies):
 NICE_FIGURES = Path('./figures/nice_figures')
 def create_nice_figures(poles,zeros,X_spectra,Y_spectra,nc_path,pulses,data_frequencies):
     NICE_FIGURES.mkdir(exist_ok=True)
-    mask =poles.real > 0
+    #mask =poles.real > 0
     
-    poles[mask] = -abs(poles[mask].real)+1j*poles[mask].imag
+    #poles[mask] = -abs(poles[mask].real)+1j*poles[mask].imag
     b,a = to_coefficents(poles,zeros)
-    b_norm,a_norm = scipy.signal.normalize(b,a)
-
+    if a.shape[0] < b.shape[0]:
+        a= np.repeat(a,(b.shape[0]//a.shape[0]))
+    print(a.shape)
+    print(b.shape)
+    #b_norm,a_norm = scipy.signal.normalize(b,a)
+    a_norm = a
+    b_norm=b
+    
+        
     frequencies_hz = np.logspace(-3,3,5000)
     frequencies_rad = frequencies_hz*2*np.pi
 
@@ -367,20 +374,22 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,nc_path,pulses,data_freq
     
     #   Time domain impulse/step response
 
-    times = np.linspace(0,frequencies_hz.shape[0],frequencies_hz.shape[0])
-    t,impulse = scipy.signal.impulse((b_norm,a_norm),T=times)
-    fig,(ax,ax1) = plt.subplots(2,layout='constrained')
-    ax.plot(t,impulse)
-    ax.set_xlabel('samples')
-    ax.set_ylabel('Impulse Response')
+    # times = np.linspace(0,frequencies_hz.shape[0],frequencies_hz.shape[0])
+    # print(a_norm.shape)
+    # print(b_norm.shape)
+    # t,impulse = scipy.signal.impulse((b_norm,a_norm),T=times)
+    # fig,(ax,ax1) = plt.subplots(2,layout='constrained')
+    # ax.plot(t,impulse)
+    # ax.set_xlabel('samples')
+    # ax.set_ylabel('Impulse Response')
 
-    t,step = scipy.signal.step((b_norm,a_norm),T=times)
+    # t,step = scipy.signal.step((b_norm,a_norm),T=times)
 
-    ax1.plot(t,step)
-    ax1.set_xlabel('samples')
-    ax1.set_ylabel('Step Response')
-    plt.savefig(NICE_FIGURES.joinpath('impulse_step_response.png'),dpi=256)
-    plt.close()
+    # ax1.plot(t,step)
+    # ax1.set_xlabel('samples')
+    # ax1.set_ylabel('Step Response')
+    # plt.savefig(NICE_FIGURES.joinpath('impulse_step_response.png'),dpi=256)
+    # plt.close()
 
 
     #   Coefficient spectra
@@ -388,7 +397,7 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,nc_path,pulses,data_freq
     fig,ax = plt.subplots(2,layout='constrained')
     ax[0].plot(np.abs(b_norm))
     ax[0].semilogy()
-    ax[1].plot(np.abs(b_norm))
+    ax[1].plot(np.abs(a_norm))
     ax[1].semilogy()
     ax[0].set_ylabel('Numerator Coefficents')
     ax[1].set_ylabel('Denomimator Coefficents')     
@@ -399,10 +408,10 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,nc_path,pulses,data_freq
 
     fig,ax = plt.subplots(layout='constrained')
     _,group_delay = scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
-    group_delay = compute_group_delay(phase,frequencies_rad)
-    inds = group_delay <=0
+    #group_delay = compute_group_delay(phase,frequencies_rad)
+    inds = range(0,group_delay.shape[0])#group_delay <=0
     print(group_delay)
-    ax.plot(frequencies_hz[1:][inds],group_delay[inds])
+    ax.plot(frequencies_hz[:][inds],group_delay[inds])
     ax.set_xlabel('Frequency (Hz)')
     ax.set_ylabel('Group Delay (s/rad)')
     plt.savefig(NICE_FIGURES.joinpath('group_delay.png'),dpi=256)

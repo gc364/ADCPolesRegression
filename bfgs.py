@@ -65,7 +65,8 @@ def callback_lbfgs(intermediate_result):
     print(f'Iteration Loss: {intermediate_result.fun}')
     return
 
-
+def get_bounds(type):
+    return
 
 
 def main_lbfgs():
@@ -94,10 +95,10 @@ def main_lbfgs():
     X_spectra2,Y_spectra2,_  = load_xy(pulses_path,nc_path)
     pulses2 = load_pulses(pulses_path)
     
-    X_spectra+= X_spectra1#+X_spectra2
-    Y_spectra+=Y_spectra1#+Y_spectra2
+    X_spectra+= X_spectra1+X_spectra2
+    Y_spectra+=Y_spectra1+Y_spectra2
     #frequencies = np.concatenate([frequencies,frequ])
-    pulses = np.vstack([pulses,pulses1])
+    pulses = np.vstack([pulses,pulses1,pulses2])
 
 
     #   Try applying the sinc filter to the input so we only need to estimate the FIR
@@ -111,9 +112,7 @@ def main_lbfgs():
     ax.semilogy()
     ax.legend()
     plt.savefig('test.png')
-    #exit()
-    #   We might need to change how we optimise stuff. As of now we only have 1 stage, but really we need to have 4 in one
-    #   go bearing in mind it becomes unstable past 70 poles
+  
 
     alpha = 1
     nepochs = 400
@@ -121,12 +120,11 @@ def main_lbfgs():
 
     if new_optimise:
         zeros,poles = create_fir_filter_PZs()
-        coeffs_per_stage = [35]
+        coeffs_per_stage = [35,70]
         nz = sum(coeffs_per_stage)*2     #   This is the TOTAL number of zeros, but we're only regressing for half of them
 
-        #   Fixed poles? and if so what, just put the poles in the upper complex plane, split into real and imaginary
-        #   This is useful for reducing the complexity
-        set_poles = Polynomial(np.ones_like(nz)).roots()    
+        #   Fixed poles? and if so what, just put the poles in the upper complex plane, split into real and imaginary parts
+        set_poles = np.zeros(nz)   
 
 
         ###########################################
@@ -136,6 +134,10 @@ def main_lbfgs():
         #   that is each root in the upper plane, z,say, must have a conjugate z' (as before),
         #   as well as a reciprocal conjugate pair, that is 1/z and 1/z'.
         #   
+        #
+        #   For an FIR filter `set_p`    
+        #
+        #
         #   Essentially these are the most important but for choosing what type of filter we get out
         #   We can partition these into regressing for multiple filter stages
 
@@ -190,14 +192,14 @@ def main_lbfgs():
                 callback=callback_lbfgs,
                 options={'disp':True,
                          'maxiter':nepochs,
-                         'ftol':1e-3
+                         'ftol':1e-6
                          }   
 
                 )
         print(res)
         m_post = res.x
-        if set_poles is None:
-            poles_final = poles
+        if set_poles is not None:
+            poles_final = poles[:nz//2] + 1j*poles[nz//2:]
         else:
             poles_final = m_post[nz:(3*nz)//2]+1j*m_post[(3*nz)//2:]
 
@@ -272,9 +274,9 @@ def main_lbfgs():
 
     w,h = scipy_frequency_response(poles_final,zeros_final,frequencies)
     fig,(ax,ax1) = plt.subplots(2)
-    ax.plot(w,h.real)
-    ax.plot(w,(h*X_spectra[0]).real)
-    ax1.plot(w,h.imag)
+    ax.plot(w,h.real.__abs__())
+    ax.plot(w,(h*X_spectra[0]).real.__abs__())
+    ax1.plot(w,h.imag.__abs__())
     ax.loglog()
 
     plt.savefig(f'{FIGPATH}/scipyFreqz.png')
