@@ -323,10 +323,13 @@ def compute_group_delay(phase,frequencies):
 
 
 NICE_FIGURES = Path('./figures/nice_figures')
-def create_nice_figures(poles,zeros,X_spectra,Y_spectra,nc_path,pulses,data_frequencies):
+def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_frequencies):
     NICE_FIGURES.mkdir(exist_ok=True)
     #mask =poles.real > 0
     
+    nc_path =  list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
+
+
     #poles[mask] = -abs(poles[mask].real)+1j*poles[mask].imag
     b,a = to_coefficents(poles,zeros)
     if a.shape[0] < b.shape[0]:
