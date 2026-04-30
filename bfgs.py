@@ -11,38 +11,66 @@ from shared import *
 from types import SimpleNamespace
 
 
+#   TODO:   All these need to be constrained in polar coordinates not cartesian
+#           Easiest to make the model vector in polar then convert to cartesian for
+#           computations then back again. This means the bounds will be for r and phi
 
-def apply_stages(poles,zeros,X_spectra,Y_spectra,frequencies,coeffs_per_stage,data_only=False):
-    stages = [] #   The poles and zeros for each stage
-    running = 0
-    
-    for nc in coeffs_per_stage:
-        stages.append((poles[running:running+nc],zeros[running:running+nc]))
-       
-        running+=nc
-    X_i = X_spectra
-    for i,stage in enumerate(stages):
-      
-        if i<len(stages)-1:
-            X_i = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,True)
-    
-        else:
-            l = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,False)
-            X_fin = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,True)
-    if data_only:
-        return X_fin
-    return l
+def polar_to_cartesian(poles,zeros):
+    nz = zeros.shape[0]
+
+    r_z = zeros[:nz]
+    phi_z  = zeros[nz:]
+
+    ret_zeros = np.zeros_like(zeros)
+
+    real_zeros,imag_zeros = r_z*np.cos(phi_z),r_z*np.sin(phi_z)
+    ret_zeros[:] = np.concatenate([real_zeros,imag_zeros])
+
+    r_p = poles[:nz]
+    phi_p  = poles[nz:]
+
+    ret_poles = np.zeros_like(poles)
+
+    real_poles,imag_poles = r_p*np.cos(phi_p),r_p*np.sin(phi_p)
+    ret_poles[:] = np.concatenate([real_poles,imag_poles])
+
+    return ret_poles, ret_zeros 
+
+def cartesian_to_polar(poles,zeros):
+    nz = zeros.shape[0]
+
+    real_z = zeros[:nz]
+    imag_z  = zeros[nz:]
+
+    ret_zeros = np.zeros_like(zeros)
+
+    r_z,phi_z = np.sqrt(real_z**2 + imag_z**2),np.arctan2(imag_z,real_z)
+    ret_zeros[:] = np.concatenate([r_z,phi_z])
+
+    real_p = poles[:nz]
+    imag_p  = poles[nz:]
+
+    ret_poles = np.zeros_like(poles)
+
+    real_poles,imag_poles = np.sqrt(real_p**2 + imag_p**2),np.arctan2(imag_p,real_p)
+    ret_poles[:] = np.concatenate([real_poles,imag_poles])
+
+    return ret_poles, ret_zeros 
+
+
 
 def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,
                     scipy=False,coeffs_per_stage=None,set_poles=None):
-
-    zeros = m[:nzeros//2] +  m[nzeros//2:nzeros]*1j
+    #poles,zeros = polar_to_cartesian(poles,zeros)
+    
+    
+    zeros = m[:nzeros//2]*np.exp(1j* m[nzeros//2:nzeros]) #+  m[nzeros//2:nzeros]*1j
 
     if set_poles is None:
-        poles = m[nzeros:(3*nzeros)//2]+m[(3*nzeros)//2:]*1j
+        poles = m[nzeros:(3*nzeros)//2]*np.exp(1j*m[(3*nzeros)//2:])#+m[(3*nzeros)//2:]*1j
     else:
         poles = set_poles
-
+    
     if coeffs_per_stage is not None:
         l = -apply_stages(poles,zeros,X_spectra,Y_spectra,frequencies,coeffs_per_stage)
     elif scipy == False:
@@ -111,19 +139,19 @@ def load_datasets(paths:list[Path],sinc_dec=None):
 def initialise_model(nz:int,bounds:dict,set_poles):
     if bounds.phase == 'MIN' or bounds.phase is None:
         zeros = np.concatenate([
-                                np.random.uniform(bounds.zeros_real_min,bounds.zeros_real_max,nz//2),
-                                np.random.uniform(bounds.zeros_imag_min,bounds.zeros_imag_max,nz//2)
+                                np.random.uniform(bounds.zeros_r_min,bounds.zeros_r_max,nz//2),
+                                np.random.uniform(bounds.zeros_phi_min,bounds.zeros_phi_max,nz//2)
                                 ])
     elif bounds.phase=='LINEAR':
         zeros = np.concatenate([
-                                np.random.uniform(bounds.zeros_real_min,bounds.zeros_real_max,nz//4),
-                                np.random.uniform(bounds.zeros_imag_min,bounds.zeros_imag_max,nz//4)
+                                np.random.uniform(bounds.zeros_r_min,bounds.zeros_r_max,nz//4),
+                                np.random.uniform(bounds.zeros_phi_min,bounds.zeros_phi_max,nz//4)
                                 ])
     
     if set_poles is None:
         poles = np.concatenate([
-                                np.random.uniform(bounds.poles_real_min,bounds.poles_real_max,nz//2),
-                                np.random.uniform(bounds.poles_imag_min,bounds.poles_imag_max,nz//2)
+                                np.random.uniform(bounds.poles_r_min,bounds.poles_r_max,nz//2),
+                                np.random.uniform(bounds.poles_phi_min,bounds.poles_phi_max,nz//2)
                                 ])
         m0 = np.concatenate([zeros,poles])
         return m0
@@ -131,52 +159,51 @@ def initialise_model(nz:int,bounds:dict,set_poles):
     return zeros
     
 def get_bounds(phase:str):
-    bounds = {'zeros_real_min':None,
-              'zeros_real_max':None,
-              'zeros_imag_min':None,
-              'zeros_imag_max':None,
-              'poles_real_min':None,
-              'poles_real_max':None,
-              'poles_imag_min':None,
-              'poles_imag_max':None,
+    bounds = {'zeros_r_min':None,
+              'zeros_r_max':None,
+              'zeros_phi_min':None,
+              'zeros_phi_max':None,
+              'poles_r_min':None,
+              'poles_r_max':None,
+              'poles_phi_min':None,
+              'poles_phi_max':None,
               'phase':None
               }
     
     bounds = SimpleNamespace(**bounds)
 
     if phase == 'MIN':
-        bounds.zeros_real_max = 1
-        bounds.zeros_imag_max = 1
-        bounds.poles_real_max = 1
-        bounds.poles_imag_max = 1
+        bounds.zeros_r_max = 1
+        bounds.zeros_phi_max = np.pi
+        bounds.poles_r_max = 1
+        bounds.poles_phi_max = np.pi
 
 
-        bounds.zeros_real_min = -1
-        bounds.zeros_imag_min = 0
-        bounds.poles_real_min = -1
-        bounds.poles_imag_min = 0
+        bounds.zeros_r_min = 0
+        bounds.zeros_phi_min = 0
+        bounds.poles_r_min = 0
+        bounds.poles_phi_min = 0
         bounds.phase = 'MIN'
     elif phase is None:
-        bounds.zeros_real_max = None
-        bounds.zeros_imag_max = None
-        bounds.poles_real_max = None
-        bounds.poles_imag_max = None
+        bounds.zeros_r_max = None
+        bounds.zeros_phi_max = None
+        bounds.poles_r_max = None
+        bounds.poles_phi_max = None
 
-        bounds.zeros_real_min = None
-        bounds.zeros_imag_min = 0
-        bounds.poles_real_min = None
-        bounds.poles_imag_min = 0
+        bounds.zeros_r_min = None
+        bounds.zeros_phi_min = 0
+        bounds.poles_r_min = None
+        bounds.poles_phi_min = 0
     elif phase == 'LINEAR':
-        bounds.zeros_real_max = 1
-        bounds.zeros_imag_max = 1
-        bounds.poles_real_max = 1
-        bounds.poles_imag_max = 1
+        bounds.zeros_r_max = 10
+        bounds.zeros_phi_max = 2*np.pi
+        bounds.poles_r_max = 10
+        bounds.poles_phi_max = 2*np.pi
 
-
-        bounds.zeros_real_min = -1
-        bounds.zeros_imag_min = 0
-        bounds.poles_real_min = -1
-        bounds.poles_imag_min = 0
+        bounds.zeros_r_min = 0
+        bounds.zeros_phi_min = 2*np.pi
+        bounds.poles_r_min = 0
+        bounds.poles_phi_min = 2*np.pi
         bounds.phase = 'LINEAR'
         
         pass
@@ -187,16 +214,16 @@ def get_bounds(phase:str):
 
 def sort_bounds(bounds,nz,set_poles):
     if bounds.phase == 'MIN':
-        bounds_zeros = [(bounds.zeros_real_min,bounds.zeros_real_max) for _ in range(nz//2)]  #Real
-        bounds_zeros+=[(bounds.zeros_imag_min,bounds.zeros_imag_max) for _ in range(nz//2)]  #Imag
+        bounds_zeros = [(bounds.zeros_r_min,bounds.zeros_r_max) for _ in range(nz//2)]  #Real
+        bounds_zeros+=[(bounds.zeros_phi_min,bounds.zeros_phi_max) for _ in range(nz//2)]  #Imag
     elif bounds.phase =='LINEAR':
-        bounds_zeros = [(bounds.zeros_real_min,bounds.zeros_real_max) for _ in range(nz//4)]  #Real
-        bounds_zeros+=[(bounds.zeros_imag_min,bounds.zeros_imag_max) for _ in range(nz//4)]  #Imag
+        bounds_zeros = [(bounds.zeros_r_min,bounds.zeros_r_max) for _ in range(nz//4)]  #Real
+        bounds_zeros+=[(bounds.zeros_phi_min,bounds.zeros_phi_max) for _ in range(nz//4)]  #Imag
     
     if set_poles is not None:
         return bounds_zeros
-    bounds_poles = [(bounds.poles_real_min,bounds.poles_real_max) for _ in range(nz//2)]  #Real
-    bounds_poles+=[(bounds.poles_imag_min,bounds.poles_imag_max) for _ in range(nz//2)]  #Imag
+    bounds_poles = [(bounds.poles_r_min,bounds.poles_r_max) for _ in range(nz//2)]  #Real
+    bounds_poles+=[(bounds.poles_phi_min,bounds.poles_phi_max) for _ in range(nz//2)]  #Imag
 
     ret = bounds_zeros+bounds_poles
     return ret
@@ -215,7 +242,6 @@ def get_system(type:str,phase:str,coeffs_per_stage:list[int]):
             set_poles = np.zeros(nz)
         elif phase == 'LINEAR':
             set_poles = np.zeros(nz//2)
-        
     elif 'IIR':
         set_poles = None
         bounds = bounds
@@ -238,18 +264,23 @@ def get_system(type:str,phase:str,coeffs_per_stage:list[int]):
 
 
 def sort_mpost(m_post,nz,set_poles,phase):
+   
+
+
     if phase=='MIN' or phase == None:
         if set_poles is not None:
-                poles_final = set_poles[:nz//2] + 1j*set_poles[nz//2:]
+                poles_final = set_poles[:nz//2]*np.exp(1j*set_poles[nz//2:]) #+ 1j*set_poles[nz//2:]
         else:
-            poles_final = m_post[nz:(3*nz)//2]+1j*m_post[(3*nz)//2:]
+            poles_final = m_post[nz:(3*nz)//2]*np.exp(1j*m_post[(3*nz)//2:])#+1j*m_post[(3*nz)//2:]
 
-        zeros_final = m_post[:nz//2] + 1j*m_post[nz//2:nz]
+        zeros_final = m_post[:nz//2]*np.exp(1j*m_post[nz//2:nz]) #+ 1j*m_post[nz//2:nz]
+
+
         pandz = np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),np.concatenate([zeros_final,np.conj(zeros_final)])])
         return pandz
     elif phase=='LINEAR':
         if set_poles is not None:
-                poles_final = set_poles[:nz//4] + 1j*set_poles[nz//4:]
+            poles_final = set_poles[:nz//4] + 1j*set_poles[nz//4:]
         else:
             poles_final = m_post[nz//2:(3*nz)//4]+1j*m_post[(3*nz)//4:]
 
@@ -304,7 +335,7 @@ def main_lbfgs(paths,coeffs_per_stage,f_type='FIR',f_phase='MIN',nepochs=100,new
         zeros_final = pandz[:,1]
      
      
-    create_nice_figures(poles_final,zeros_final,X_spectra,Y_spectra,paths[0],pulses,frequencies)
+    create_nice_figures(poles_final,zeros_final,X_spectra,Y_spectra,paths[0],pulses,frequencies,coeffs_per_stage)
     return
 
 if __name__ == '__main__':
@@ -322,5 +353,5 @@ if __name__ == '__main__':
     #   Decimations for the sinc filters
     sinc_dec = [16,32,256]
     
-    new_optimise = False
-    main_lbfgs(paths,coeffs_per_stage,new_optimise=new_optimise,ftol=1e-3,sinc_dec = sinc_dec,f_phase='LINEAR' )
+    new_optimise = True
+    main_lbfgs(paths,coeffs_per_stage,new_optimise=new_optimise,ftol=1e-3,sinc_dec = sinc_dec,f_phase='MIN' )

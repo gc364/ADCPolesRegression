@@ -10,7 +10,7 @@ from scipy.optimize import minimize
 import numpy.polynomial.polynomial as poly
 from scipy.signal import freqs_zpk,freqz_zpk
 from datetime import datetime
-from bfgs import apply_stages
+
 
 def sinc_filter_coeffs(N: int) -> np.ndarray:
     """
@@ -163,12 +163,17 @@ def plot_xy(X_spec,Y_spec,frequencies,nplots=4,outfile='data_test.png'):
     ax[nplots-1,1].set_xlabel('Frequency (Hz)')    
     plt.savefig(outfile,dpi=256)
 
-def to_coefficents(poles,zeros):
+def to_coefficents(poles,zeros,coeffs_per_stage=None):
     """Convert poles and zeros to numerator and denominator coefficients"""
-    num = poly.polyfromroots(zeros)
-    den = poly.polyfromroots(poles)
 
-    return num,den
+    if coeffs_per_stage is None:
+        num = poly.polyfromroots(zeros)
+        den = poly.polyfromroots(poles)
+
+        return num,den
+    
+
+
 
 def scipy_frequency_response(poles,zeros,frequencies=None,gain=1):
     """Compute the frequency response using scipy"""
@@ -317,21 +322,95 @@ def g_scipy(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],fr
     ret = [L2_norm(d_obs,d) for d_obs,d in zip(Y_spectra,ret)]
     return np.array(ret)
 
-
+def apply_stages(poles,zeros,X_spectra,Y_spectra,frequencies,coeffs_per_stage,data_only=False,transfer_function=False):
+    stages = [] #   The poles and zeros for each stage
+    running = 0
+    
+    for nc in coeffs_per_stage:
+        stages.append((poles[running:running+nc],zeros[running:running+nc]))
+       
+        running+=nc
+    X_i = X_spectra
+    for i,stage in enumerate(stages):
+      
+        if i<len(stages)-1:
+            X_i = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,True)
+            if transfer_function:
+                X_i = [X_i[i]-np.log10(X_spectra[i].__abs__()+1e-5) for i in range(len(X_spectra))]
+        else:
+            l = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,False)
+            X_fin = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,True)
+            if transfer_function:
+                X_fin = [X_fin[i]-np.log10(X_spectra[i].__abs__()+1e-5) for i in range(len(X_spectra))]
+    if data_only:
+        return X_fin
+    return l
 def compute_group_delay(phase,frequencies):
     return -np.diff(phase)/np.diff(frequencies)
 
 
+
+
+def compute_thd(X_spectra,Y_spectra,input_freqs,data_frequencies,num_harmonics=5):
+
+    sorted_freq_ind = np.argsort(input_freqs)
+
+    #   THD of the input signal
+    thds = []
+    for f,X in zip(input_freqs,X_spectra):
+        nyq_ind = np.argmin(abs(data_frequencies-250))
+        X[nyq_ind:] = 0
+        sort_ind = []
+        for i in range(num_harmonics):
+            if i== 0 :
+                sort_ind.append(np.argmin(abs(data_frequencies-f)))
+            elif i>0:
+                sort_ind.append(np.argmin(abs(data_frequencies-f*(i))))
+        harmonics = X[sort_ind]
+        thd = np.sum(harmonics[1:].__abs__())/harmonics[0].__abs__()
+
+        thds.append(thd)
+    
+    #   In decimal
+    thd_in = np.array(thds)[sorted_freq_ind]
+    
+  
+
+    #   THD of the output signal
+    thds = []
+    for f,X in zip(input_freqs,Y_spectra):
+        X = 10**X
+        nyq_ind = np.argmin(abs(data_frequencies-250))
+        X[nyq_ind:] = 0
+        sort_ind,_ = scipy.signal.find_peaks(X)
+        sort_ind = []
+        for i in range(num_harmonics):
+            if i== 0 :
+                sort_ind.append(np.argmin(abs(data_frequencies-f)))
+            elif i>0:
+                sort_ind.append(np.argmin(abs(data_frequencies-f*(i))))
+        harmonics = X[sort_ind]
+        thd = np.sum(harmonics[1:].__abs__())/harmonics[0].__abs__()
+
+        thds.append(thd)
+        
+    #   in deicmal
+    thd_out = np.array(thds)[sorted_freq_ind]
+
+    #   Work out the distortion between in and out signal and convert to decibels
+    ret = 20*np.log10((thd_out-thd_in))
+
+    return ret, input_freqs[sorted_freq_ind]
+
 NICE_FIGURES = Path('./figures/nice_figures')
-def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_frequencies):
+def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_frequencies,coeffs_per_stage):
     NICE_FIGURES.mkdir(exist_ok=True)
-    #mask =poles.real > 0
     
     nc_path =  list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
 
-
-    #poles[mask] = -abs(poles[mask].real)+1j*poles[mask].imag
     b,a = to_coefficents(poles,zeros)
+    print(a.shape)
+    print(b.shape)
     if a.shape[0] < b.shape[0]:
         a= np.repeat(a,(b.shape[0]//a.shape[0]))
     print(a.shape)
@@ -341,16 +420,16 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     b_norm=b
     
         
-    frequencies_hz = np.logspace(-3,3,5000)
+    frequencies_hz = data_frequencies.copy()
     frequencies_rad = frequencies_hz*2*np.pi
 
     _,H = scipy_frequency_response(poles,zeros,frequencies_rad)
     phase = np.angle(H)
 
     #   Transfer function (rad)
-
     fig,ax  = plt.subplots(2,layout='constrained')
-    ax[0].plot(frequencies_rad,20*np.log10(H))
+    ax[0].plot(frequencies_rad,20*np.log10(H.real.__abs__()))
+
     ax[0].semilogx()
     ax[0].set_xlabel(r'$\omega$ (rad/s)')
     ax[0].set_ylabel(r'Response (dB)')
@@ -361,8 +440,7 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     plt.savefig(NICE_FIGURES.joinpath('frequency_response.png'),dpi=256)
     plt.close()
 
-      #   Transfer function (Hz)
-
+    #   Transfer function (Hz)
     fig,ax  = plt.subplots(2,layout='constrained')
     ax[0].plot(frequencies_hz,20*np.log10(H))
     ax[0].semilogx()
@@ -375,12 +453,11 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     plt.savefig(NICE_FIGURES.joinpath('frequency_response_hz.png'),dpi=256)
     plt.close()
     
-    #   Time domain impulse/step response
-
+    # #   Time domain impulse/step response
     # times = np.linspace(0,frequencies_hz.shape[0],frequencies_hz.shape[0])
-    # print(a_norm.shape)
-    # print(b_norm.shape)
+    
     # t,impulse = scipy.signal.impulse((b_norm,a_norm),T=times)
+    # print(impulse)
     # fig,(ax,ax1) = plt.subplots(2,layout='constrained')
     # ax.plot(t,impulse)
     # ax.set_xlabel('samples')
@@ -424,89 +501,18 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     #   Total Harmonic Distortion
 
     input_freqs = pulses[:,1]
-    sorted_freq_ind = np.argsort(input_freqs)
+    thd,w = compute_thd(X_spectra,Y_spectra,input_freqs,data_frequencies)
 
-    #   THD of the input signal
-    thds = []
-    for f,X in zip(input_freqs,X_spectra):
-        nyq_ind = np.argmin(abs(data_frequencies-250))
-        X[nyq_ind:] = 0
-        sort_ind = []
-        for i in range(32):
-            if i== 0 :
-                sort_ind.append(np.argmin(abs(data_frequencies-f)))
-            elif i <=16:
-                sort_ind.append(np.argmin(abs(data_frequencies-f*(1/i))))
-            elif i>16:
-                sort_ind.append(np.argmin(abs(data_frequencies-f*(i))))
-        harmonics = X[sort_ind] 
-        thd = np.sum(harmonics[1:].__abs__())/harmonics[0].__abs__()
-        thd = thd/np.sqrt(1+thd**2)
-        thds.append(20*np.log10(thd))
-    
-    thd_in = np.array(thds)[sorted_freq_ind]
+    mask = w==31.25
+
 
     fig,ax = plt.subplots()
-    ax.plot(input_freqs[sorted_freq_ind],thd_in)
+    ax.plot(w,thd,'r*-')
+    ax.set_title(f'THD at 31.25Hz = {np.mean(thd[mask]):02f} +- {np.std(thd[mask]):04f} dB')
     ax.set_ylabel('THD (dB)')
     ax.set_xlabel('Input Freq (Hz)')
-    plt.savefig(NICE_FIGURES.joinpath('THD_observed_X.png'))
-    plt.close()
 
-    #   THD of the output signal
-
-    thds = []
-    for f,X in zip(input_freqs,Y_spectra):
-        X = 10**X
-        sort_ind,_ = scipy.signal.find_peaks(X)
-        sort_ind = []
-        for i in range(32):
-            if i== 0 :
-                sort_ind.append(np.argmin(abs(data_frequencies-f)))
-            elif i <=16:
-                sort_ind.append(np.argmin(abs(data_frequencies-f*(1/i))))
-            elif i>16:
-                sort_ind.append(np.argmin(abs(data_frequencies-f*(i))))
-        harmonics = X[sort_ind] 
-   
-        thd = np.sum(harmonics[1:].__abs__())/harmonics[0].__abs__()
-        thd = thd/np.sqrt(1+thd**2)
-        thds.append(20*np.log10(thd))
-        
-    thd_out = np.array(thds)[sorted_freq_ind]
-
-    fig,ax = plt.subplots()
-    ax.plot(input_freqs[sorted_freq_ind],thd_out)
-    ax.set_ylabel('THD (dB)')
-    ax.set_xlabel('Input Freq (Hz)')
-    plt.savefig(NICE_FIGURES.joinpath('THD_observed_Y.png'))
-    plt.close()
-
-    fig,ax = plt.subplots()
-    ax.plot(input_freqs[sorted_freq_ind],thd_out-thd_in)
-    ax.set_ylabel('THD (dB)')
-    ax.set_xlabel('Input Freq (Hz)')
     plt.savefig(NICE_FIGURES.joinpath('THD_observed_diff.png'))
-    plt.close()
-
-
-
-    #   Circular poles and zeros
-    print(poles.max())
-    print(zeros.max())
-    print(poles.min())
-    print(zeros.min())
-    zeros_c = np.exp(1j*np.angle(zeros))
-    poles_c = np.exp(1j*np.angle(poles))
-
-    fig,ax = plt.subplots()
-    ax.plot(zeros_c.real,zeros_c.imag,'o')
-    ax.plot(poles_c.real,poles_c.imag,'x')
-    ax.grid()
-    f_obs = 31.25
-    f_obs_c = np.exp(1j*f_obs*2*np.pi)
-    ax.plot(f_obs_c.real,f_obs_c.imag,'*')
-    plt.savefig(NICE_FIGURES.joinpath('unit_poles.png'),dpi=256)
     plt.close()
 
 
@@ -572,7 +578,7 @@ def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGP
     ax[1].set_xlabel('Frequency (Hz)')
     ax[0].set_ylabel(r'$\mathfrak{R}$')
     ax[1].set_ylabel(r'$\mathfrak{I}$')
-    ax[1].plot(frequencies,H.imag)
+    ax[1].plot(frequencies,H.imag.__abs__())
     ax[0].loglog()
     plt.savefig(f'{FIGPATH}/Transfer_function.png')
     plt.close()
