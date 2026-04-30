@@ -10,7 +10,7 @@ from scipy.optimize import minimize
 import numpy.polynomial.polynomial as poly
 from scipy.signal import freqs_zpk,freqz_zpk
 from datetime import datetime
-
+from bfgs import apply_stages
 
 def sinc_filter_coeffs(N: int) -> np.ndarray:
     """
@@ -558,4 +558,88 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
 
 
   
+    return
+def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH):
+
+    poles_final,zeros_final = pandz[:,0],pandz[:,1]
+    if coeffs_per_stage is not None:
+        data_reconst = apply_stages(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,coeffs_per_stage,True)
+    #data_reconst = g_scipy(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,True)
+
+    fig,ax = plt.subplots(2,layout='constrained')
+    H = calculate_transfer_function(poles_final,zeros_final,2*np.pi*frequencies)
+    ax[0].plot(frequencies,H.real.__abs__()/(2*np.pi))
+    ax[1].set_xlabel('Frequency (Hz)')
+    ax[0].set_ylabel(r'$\mathfrak{R}$')
+    ax[1].set_ylabel(r'$\mathfrak{I}$')
+    ax[1].plot(frequencies,H.imag)
+    ax[0].loglog()
+    plt.savefig(f'{FIGPATH}/Transfer_function.png')
+    plt.close()
+
+    fig,ax = plt.subplots(layout='constrained')
+    ax.plot(poles_final.real,poles_final.imag,'x',label='Poles')
+    ax.plot(zeros_final.real,zeros_final.imag,'o',label='Zeros')
+    ax.set_ylabel(r'$\mathfrak{Im} (rad/s)$')
+    ax.set_xlabel(r'$\mathfrak{Re} (rad/s)$')
+    ax.grid()
+    plt.savefig(f'{FIGPATH}/PoleandZeros.png')
+    fig,ax = plt.subplots(layout='constrained')
+    ax.plot(poles_final.real/(2*np.pi),poles_final.imag/(2*np.pi),'x',label='Poles')
+    ax.plot(zeros_final.real/(2*np.pi),zeros_final.imag/(2*np.pi),'o',label='Zeros')
+    ax.set_ylabel(r'$\mathfrak{Im} (Hz)$')
+    ax.set_xlabel(r'$\mathfrak{Re} (Hz)$')
+    ax.grid()
+    plt.savefig(f'{FIGPATH}/PoleandZerosHz.png')
+
+    #.42.30
+    fig,(ax,ax1) = plt.subplots(2,layout='constrained')
+
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel(r'$||\Delta d||_{2}^{2}$')
+    for y,d in zip(Y_spectra,data_reconst):
+        ax1.plot(frequencies,10**y,'r')
+        ax1.plot(frequencies,10**d,'k')
+    ax1.loglog()
+    fig.savefig(f'{FIGPATH}/losses.png')
+    plt.close()
+
+
+    fig,ax = plt.subplots(3,layout='constrained')
+    for y,d,axs,f in zip(
+                        [Y_spectra[0],Y_spectra[50],Y_spectra[100]],
+                        [data_reconst[0],data_reconst[50],data_reconst[100]],
+                        ax,[pulses[0,1],pulses[50,1],pulses[100,1]]
+                       ):
+        axs.plot(frequencies,10**y,'k-',label='Observations')
+        axs.plot(frequencies,10**d,'r--',label='Synthetics')
+        axs.loglog()
+        axs.set_title(rf'$f_x$ = {f}')
+        
+        axs.set_ylabel(r'Log(Amp)')
+    ax[-1].set_xlabel('Iteration')
+    fig.savefig(f'{FIGPATH}/data_fit.png')
+    plt.close()
+
+
+    w,h = scipy_frequency_response(poles_final,zeros_final,2*np.pi*frequencies)
+    fig,(ax,ax1) = plt.subplots(2)
+    ax.set_title(r'$\mathfrak{Re}(H(\omega))$')
+    ax.plot(w,h.real.__abs__())
+    ax1.set_title(r'$\mathfrak{Im}(H(\omega))$')
+    ax1.plot(w,h.imag.__abs__())
+    ax1.set_xlabel(r'$\omega$ (rad/s)')
+    ax.loglog()
+    ax1.loglog()
+    plt.savefig(f'{FIGPATH}/scipyFreqz.png')
+    plt.close()
+
+    fig,ax = plt.subplots()
+    phase = np.angle(h)
+    ax.plot(w,phase)
+    ax.set_xlabel(r'$\omega$ (radians)')
+    ax.set_ylabel(r'$\Phi$ (radians)')
+    ax.semilogx()
+    plt.savefig(f'{FIGPATH}/phase_repsonse.png')
+    plt.close()
     return
