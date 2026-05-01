@@ -95,7 +95,10 @@ def create_fir_filter_PZs():
     H_cascade = np.convolve(H_cascade, upsample_and_pad(h4, 16))
 
 
-  
+    numerator1 = Polynomial(h1)
+    zeros1=numerator1.roots()
+    numerator2 = Polynomial(h2)
+    zeros2=numerator2.roots()
     numerator3 = Polynomial(h3)
     zeros3=numerator3.roots()
     numerator4 = Polynomial(h4)
@@ -119,21 +122,41 @@ def create_fir_filter_PZs():
     ax.set_ylabel('Transfer function')
     plt.savefig('figures/fir_old.png')
 
-    fig,ax = plt.subplots(3,layout='constrained',figsize=(11.7,8.2))
+    fig,ax = plt.subplots(5,layout='constrained',figsize=(8.2,11.7))
     print(f'Number of Zeros: {zeros.shape}')
     print(f'Number of Poles: {poles.shape}')
     ax[0].plot(zeros.real,zeros.imag,'o')
     ax[0].plot(poles.real,poles.imag,'x',markersize=4)
     ax[0].grid()
     ax[0].set_ylabel(r'$\mathfrak{Im}$')
-    ax[0].set_ylabel(r'$\mathfrak{Re}$')
-
-    ax[1].plot(zeros3.real,zeros3.imag,'o')
-    ax[1].grid()
-    #ax[3].plot(poles.real,poles.imag,'x',markersize=4)
+    ax[4].set_xlabel(r'$\mathfrak{Re}$')
+    ax[0].set_title('Full Cascade')
+    ax[0].set_aspect('equal')
     
-    ax[2].plot(zeros4.real,zeros4.imag,'o')
+    ax[1].set_title('Linear')
+    
+    
+    ax[1].plot(zeros1.real,zeros1.imag,'o')
+    ax[1].grid()
+    ax[1].set_ylabel(r'$\mathfrak{Im}$')
+    #ax[3].plot(poles.real,poles.imag,'x',markersize=4)
+    ax[1].set_aspect('equal')
+    
+    ax[2].plot(zeros2.real,zeros2.imag,'o')
     ax[2].grid()
+    ax[2].set_ylabel(r'$\mathfrak{Im}$')
+    ax[2].set_aspect('equal')
+
+    ax[3].set_title('Min-phase')
+    ax[3].plot(zeros3.real,zeros3.imag,'o')
+    ax[3].grid()
+    ax[3].set_ylabel(r'$\mathfrak{Im}$')
+    ax[3].set_aspect('equal')
+
+    ax[4].plot(zeros4.real,zeros4.imag,'o')
+    ax[4].grid()
+    ax[4].set_ylabel(r'$\mathfrak{Im}$')
+    ax[4].set_aspect('equal')
     #ax[4].plot(poles.real,poles.imag,'x',markersize=4)
 
 
@@ -142,7 +165,7 @@ def create_fir_filter_PZs():
 
     return zeros,poles
 
-
+create_fir_filter_PZs()
 def load_pulses(pulses_path):
     pulses = np.loadtxt(pulses_path,delimiter='\t')
     return pulses
@@ -177,6 +200,7 @@ def to_coefficents(poles,zeros,coeffs_per_stage=None):
 
 def scipy_frequency_response(poles,zeros,frequencies=None,gain=1):
     """Compute the frequency response using scipy"""
+  
     if type(frequencies) == None:
         w,H = freqz_zpk(zeros,poles,gain,worN=1500,fs=2*np.pi*500)
         
@@ -204,7 +228,7 @@ def data_transform(spectra):
     ret = []
     eps = 1e-5
     for s in spectra:
-        ts = (s**2)**0.5
+        ts = abs(s)
         ts+=eps
         ret.append(np.log10(ts))
     return ret
@@ -250,7 +274,7 @@ def load_xy(pulses_path,data_path):
     #   Bruh
     X_spectra = [np.fft.rfft(x,n=2*n-1) for x in x_timeseries]
     X_frequencies = np.fft.rfftfreq(n=2*n-1,d=1/(2*target_high))
-    
+    X_frequencies[0]+=1e-5
     # fig,ax = plt.subplots()
     # ax.plot(X_frequencies,X_spectra[-1]/X_spectra[-1].max())
     # ax.plot(Y_frequencies,Y_spectra[-1]/Y_spectra[-1].max())
@@ -562,7 +586,7 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     plt.savefig(f'{NICE_FIGURES}/SNR.png',dpi=256)
     plt.close()
 
-
+    #   FOr SFDR we need to look for the highest other peak, relative to the fundamental. Should be +ve
   
     return
 def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH):
@@ -574,18 +598,22 @@ def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGP
 
     fig,ax = plt.subplots(2,layout='constrained')
     H = calculate_transfer_function(poles_final,zeros_final,2*np.pi*frequencies)
-    ax[0].plot(frequencies,H.real.__abs__()/(2*np.pi))
+    ax[0].plot(frequencies,H.real.__abs__()/(2*np.pi) + 1e-5)
     ax[1].set_xlabel('Frequency (Hz)')
     ax[0].set_ylabel(r'$\mathfrak{R}$')
     ax[1].set_ylabel(r'$\mathfrak{I}$')
     ax[1].plot(frequencies,H.imag.__abs__())
-    ax[0].loglog()
+    #ax[0].loglog()
     plt.savefig(f'{FIGPATH}/Transfer_function.png')
     plt.close()
 
     fig,ax = plt.subplots(layout='constrained')
     ax.plot(poles_final.real,poles_final.imag,'x',label='Poles')
     ax.plot(zeros_final.real,zeros_final.imag,'o',label='Zeros')
+    x = np.linspace(-1,1,100)
+    y = np.sqrt(1-x**2)
+    ax.plot(x,y,'k--')
+    ax.plot(x,-y,'k--')
     ax.set_ylabel(r'$\mathfrak{Im} (rad/s)$')
     ax.set_xlabel(r'$\mathfrak{Re} (rad/s)$')
     ax.grid()
