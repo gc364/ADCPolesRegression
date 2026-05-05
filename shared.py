@@ -116,10 +116,17 @@ def create_fir_filter_PZs():
     poles = denominator.roots()
     print(poles)
     # Frequency response at the sinc output rate
-    w, H = scipy.signal.freqz(H_cascade, worN=250, fs=500,whole=True)
-    fig,ax = plt.subplots()
-    ax.plot(w,H)
-    ax.set_ylabel('Transfer function')
+    X_frequencies = np.fft.rfftfreq(n=2*18001-1,d=1/(2*1500))
+    X_frequencies[0]+=1e-5
+    w, H = scipy.signal.freqz(H_cascade, worN=2*np.pi*X_frequencies, fs=500,whole=True)
+    fig,(ax1,ax) = plt.subplots(2)
+    ax.plot(w,np.angle(H))
+    ax.semilogx()
+    ax.set_ylabel('Phase')
+    w, H = scipy.signal.freqz_zpk(zeros,np.zeros_like(zeros1),1, worN=2*np.pi*X_frequencies, fs=500,whole=True)
+    ax1.plot(w,20*np.log10(H.__abs__()))
+    ax1.set_ylabel('Transfer function dB')
+    ax1.semilogx()
     plt.savefig('figures/fir_old.png')
 
     fig,ax = plt.subplots(5,layout='constrained',figsize=(8.2,11.7))
@@ -205,7 +212,7 @@ def scipy_frequency_response(poles,zeros,frequencies=None,gain=1):
         w,H = freqz_zpk(zeros,poles,gain,worN=1500,fs=2*np.pi*500)
         
         return w,H
-    w,H = freqz_zpk(zeros,poles,gain,frequencies)
+    w,H = freqz_zpk(zeros,poles,gain,frequencies,fs=2*np.pi*500)
   
     return w,H
 
@@ -263,7 +270,7 @@ def load_xy(pulses_path,data_path):
     Y_frequencies = np.concatenate([Y_frequencies,np.linspace(max_f,target_high,pad_number)])
     Y_spectra = [np.concatenate([y,np.zeros(pad_number)]) for y in Y_spectra]
     n = Y_frequencies.shape[0]
-
+    print(f'NUMFREQS = {n}')
     #   Calculate X spectra       
 
     x_timeseries = []
@@ -329,6 +336,8 @@ def g_scipy(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],fr
     """The forward model for a list of spectra and frequencies"""
     ret = []
     #   We only search for poles in the upper left quadrant, and append the remaining co
+    if zeros.shape[0]!=poles.shape[0]:
+        raise Exception('Poles and zeros are not the same size')
     zeros = np.concatenate([zeros,np.conj(zeros)])
     poles = np.concatenate([poles,np.conj(poles)])
     w,h  = scipy_frequency_response(poles,zeros,2*np.pi*frequencies)
@@ -658,8 +667,8 @@ def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGP
 
     w,h = scipy_frequency_response(poles_final,zeros_final,2*np.pi*frequencies)
     fig,(ax,ax1) = plt.subplots(2)
-    ax.set_title(r'$\mathfrak{Re}(H(\omega))$')
-    ax.plot(w,h.real.__abs__())
+    ax.set_title(r'$||H(\omega)||$')
+    ax.plot(w,h.__abs__())
     ax1.set_title(r'$\mathfrak{Im}(H(\omega))$')
     ax1.plot(w,h.imag.__abs__())
     ax1.set_xlabel(r'$\omega$ (rad/s)')
