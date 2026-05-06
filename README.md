@@ -17,3 +17,11 @@ These are stable, causal FIR filters with ALL zeros inside the unit circle. They
 For exactly linear phase response the filter must be FIR and the zeros come in sets of 4 instead of 2. For a complex zero, z, we need its conjugate, z',
 as well as its reciprocal and reciprocal conjugate, 1/z and 1/z'. Again these can be approximated with IIR filters but will not have perfectly linear phase.
 The expanded filter coefficients are also either symmetric or anti-symmetric and the locations of the zeros are mirrored around the unit circle.
+
+### Nanometrics Data
+These are some of the values of things from the nanometric filter that the regressed filter should conform to (ish)
+
+    Stop Band:  0.5*sample_rate (250Hz)
+    Corner Freq (-3dB): 0.413*sampling_rate (206.5Hz)
+    Group Delay
+

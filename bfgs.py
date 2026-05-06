@@ -59,29 +59,38 @@ def cartesian_to_polar(poles,zeros):
 
 
 
-def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,
+def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
                     scipy=False,coeffs_per_stage=None,set_poles=None,phase='MIN'):
 
     #   changing to cartesian from polar
-    zeros = m[:nzeros//2]*np.exp(1j* m[nzeros//2:nzeros]) #+  m[nzeros//2:nzeros]*1j
-
-    if phase == 'LINEAR':
-        #mask = np.sqrt(zeros.real**2+zeros.imag**2) >1
-        zeros = np.concatenate([zeros,1/zeros])
-
-    if set_poles is None:
-        poles = m[nzeros:(3*nzeros)//2]*np.exp(1j*m[(3*nzeros)//2:])#+m[(3*nzeros)//2:]*1j
-    else:
-        poles = set_poles
-        poles = poles[0:nzeros//2]*np.exp(1j*poles[(nzeros)//2:])
+    zeros_list = []
+    poles_list = []
+  
     
-    if zeros.shape[0]!= poles.shape[0]:
-        to_pad = poles.shape[0]-zeros.shape[0]
-        if to_pad >1:
-            poles = poles[:poles.shape[0]-to_pad]
-        elif to_pad <1:
-            poles = np.concatenate([poles,np.zeros(-to_pad)])
+    for i,(phase,nc) in enumerate(zip(phases_per_stage,coeffs_per_stage)):
+        zeros = m[i*nc:(i+1)*nc]*np.exp(1j* m[(nzeros//2)+(i*nc):(nzeros//2)+((i+1)*nc)]) #+  m[nzeros//2:nzeros]*1j
+        #print(f'Radius Start:   {i*nc} \n Radius End:   {(i+1)*nc}  \n Phase Start: {(nzeros//2)+(i*nc)}    \n  Phase end:  {(nzeros//2)+((i+1)*nc)}')
+        if phase == 'LINEAR':
+            zeros = np.concatenate([zeros,1/zeros])
 
+        if set_poles is None:
+            poles = m[nzeros:(3*nzeros)//2]*np.exp(1j*m[(3*nzeros)//2:])#+m[(3*nzeros)//2:]*1j
+        else:
+            poles = set_poles
+            poles = poles[i*nc:(i+1)*nc]*np.exp(1j*poles[(nzeros//2)+(i*nc):(nzeros//2)+((i+1)*nc)])
+        
+        if zeros.shape[0]!= poles.shape[0]:
+            to_pad = poles.shape[0]-zeros.shape[0]
+            if to_pad >1:
+                poles = poles[:poles.shape[0]-to_pad]
+            elif to_pad <1:
+                poles = np.concatenate([poles,np.zeros(-to_pad)])
+        zeros_list.append(zeros)
+        poles_list.append(poles)
+  
+    zeros = np.concatenate(zeros_list)
+    poles = np.concatenate(poles_list)
+  
 
     if coeffs_per_stage is not None:
         l = -apply_stages(poles,zeros,X_spectra,Y_spectra,frequencies,coeffs_per_stage)
@@ -92,7 +101,7 @@ def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,
     
     return np.sqrt(l.__abs__()@l.__abs__().T)
 
-def jac_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,scipy=False,coeffs_per_stage=None,set_poles=None,phase='MIN'):
+def jac_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,scipy=False,coeffs_per_stage=None,set_poles=None,phase='MIN'):
 
     #   I think we need to scale the angular part of g by r (the top half of g)
 
@@ -102,18 +111,18 @@ def jac_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,scipy=False,coeffs_per_st
     for i in range(m.shape[0]):
         mn = m.copy()
         mn[i]-= eps
-        lower = objective_lbfgs(mn,nzeros,X_spectra,Y_spectra,frequencies,
+        lower = objective_lbfgs(mn,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
                                 scipy=scipy,coeffs_per_stage=coeffs_per_stage,
                                 set_poles=set_poles,phase=phase)
         mp = m.copy()
         mp[i]+= eps
-        upper = objective_lbfgs(mp,nzeros,X_spectra,Y_spectra,frequencies,
+        upper = objective_lbfgs(mp,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
                                 scipy=scipy,coeffs_per_stage=coeffs_per_stage,
                                 set_poles=set_poles,phase=phase)
 
         g[i] = (upper-lower)/eps
 
-    g[m.shape[0]//2:] *= 1/g[:m.shape[0]//2]
+    #g[m.shape[0]//2:] *= 1/g[:m.shape[0]//2]
 
     return g
 
@@ -157,36 +166,46 @@ def load_datasets(paths:list[Path],sinc_dec=None):
     
     return X_spectra,Y_spectra,frequencies,pulses
 
-def initialise_model(nz:int,bounds:dict,set_poles,unit_circle=True):
-    if not unit_circle:
-        if bounds.phase == 'MIN' or bounds.phase is None:
-            zeros = np.concatenate([
-                                    np.random.uniform(bounds.zeros_r_min,bounds.zeros_r_max,nz//2),
-                                    np.random.uniform(bounds.zeros_phi_min,bounds.zeros_phi_max,nz//2)
-                                    ])
-        elif bounds.phase=='LINEAR':
-            zeros = np.concatenate([
-                                    np.random.uniform(bounds.zeros_r_min,bounds.zeros_r_max,nz//4),
-                                    np.random.uniform(bounds.zeros_phi_min,bounds.zeros_phi_max,nz//4)
-                                    ])
-    else:
-        if bounds.phase == 'MIN' or bounds.phase is None:
-            phi = np.linspace(0,np.pi,nz//2)
-            r = np.ones(nz//2)#-0.3
-            zeros = np.concatenate([r,phi])
-        elif bounds.phase=='LINEAR':
-            phi = np.linspace(0,np.pi,nz//4)
-            r = np.ones(nz//4)#-0.3
-            zeros = np.concatenate([r,phi])
-    
+def initialise_model(coeffs_per_stage:list[int],bounds_list:list[dict],set_poles,unit_circle=True):
+    poles_list= []
+    zeros_list_r = []
+    zeros_list_phi = []
+    for bounds,nz in zip(bounds_list,coeffs_per_stage):
+        if not unit_circle:
+            if bounds.phase == 'MIN' or bounds.phase is None:
+                zeros_list_r.append(np.concatenate([
+                                        np.random.uniform(bounds.zeros_r_min,bounds.zeros_r_max,nz),
+                                        np.random.uniform(bounds.zeros_phi_min,bounds.zeros_phi_max,nz)
+                                        ]))
+            elif bounds.phase=='LINEAR':
+                zeros_list_phi.append(np.concatenate([
+                                        np.random.uniform(bounds.zeros_r_min,bounds.zeros_r_max,nz),
+                                        np.random.uniform(bounds.zeros_phi_min,bounds.zeros_phi_max,nz)
+                                        ]))
+        else:
+            if bounds.phase == 'MIN' or bounds.phase is None:
+                phi = np.linspace(0,np.pi,nz)
+                r = np.ones(nz)#-0.3
+                zeros_list_r.append(r)
+                zeros_list_phi.append(phi)
+            elif bounds.phase=='LINEAR':
+                phi = np.linspace(0,np.pi,nz)
+                r = np.ones(nz)#-0.3
+                zeros_list_r.append(r)
+                zeros_list_phi.append(phi)
+        
+        if set_poles is None:
+            poles_list.append(np.concatenate([
+                                    np.random.uniform(bounds.poles_r_min,bounds.poles_r_max,nz),
+                                    np.random.uniform(bounds.poles_phi_min,bounds.poles_phi_max,nz)
+                                    ]))
     if set_poles is None:
-        poles = np.concatenate([
-                                np.random.uniform(bounds.poles_r_min,bounds.poles_r_max,nz//2),
-                                np.random.uniform(bounds.poles_phi_min,bounds.poles_phi_max,nz//2)
-                                ])
+        zeros = np.concatenate(zeros_list_r+zeros_list_phi)
+        poles = np.concatenate(poles_list)    
         m0 = np.concatenate([zeros,poles])
         return m0
-
+    
+    zeros = np.concatenate(zeros_list_r+zeros_list_phi)
     return zeros
     
 def get_bounds(phase:str):
@@ -226,9 +245,9 @@ def get_bounds(phase:str):
         bounds.poles_r_min = 0
         bounds.poles_phi_min = 0
     elif phase == 'LINEAR':
-        bounds.zeros_r_max = 2
+        bounds.zeros_r_max = 3
         bounds.zeros_phi_max = np.pi
-        bounds.poles_r_max = 2
+        bounds.poles_r_max = 3
         bounds.poles_phi_max = np.pi
 
         bounds.zeros_r_min = 1/bounds.zeros_r_max
@@ -241,23 +260,26 @@ def get_bounds(phase:str):
     return bounds
     
 
-def sort_bounds(bounds,nz,set_poles):
-    if bounds.phase == 'MIN':
-        bounds_zeros = [(bounds.zeros_r_min,bounds.zeros_r_max) for _ in range(nz//2)]  #Real
-        bounds_zeros+=[(bounds.zeros_phi_min,bounds.zeros_phi_max) for _ in range(nz//2)]  #Imag
-    elif bounds.phase =='LINEAR':
-        bounds_zeros = [(bounds.zeros_r_min,bounds.zeros_r_max) for _ in range(nz//4)]  #Real
-        bounds_zeros+=[(bounds.zeros_phi_min,bounds.zeros_phi_max) for _ in range(nz//4)]  #Imag
-    
-    if set_poles is not None:
-        return bounds_zeros
-    bounds_poles = [(bounds.poles_r_min,bounds.poles_r_max) for _ in range(nz//2)]  #Real
-    bounds_poles+=[(bounds.poles_phi_min,bounds.poles_phi_max) for _ in range(nz//2)]  #Imag
+def sort_bounds(bounds_list,coeffs_per_stage,set_poles):
+    bounds_zeros_r = []
+    bounds_zeros_phi = []
+    for bounds,nz in zip(bounds_list,coeffs_per_stage):
+        if bounds.phase == 'MIN':
+            bounds_zeros_r += [(bounds.zeros_r_min,bounds.zeros_r_max) for _ in range(nz)]  #Real
+            bounds_zeros_phi+=[(bounds.zeros_phi_min,bounds.zeros_phi_max) for _ in range(nz)]  #Imag
+        elif bounds.phase =='LINEAR':
+            bounds_zeros_r += [(bounds.zeros_r_min,bounds.zeros_r_max) for _ in range(nz)]  #Real
+            bounds_zeros_phi+=[(bounds.zeros_phi_min,bounds.zeros_phi_max) for _ in range(nz)]  #Imag
+        
+        if set_poles is not None:
+            continue
+        bounds_poles = [(bounds.poles_r_min,bounds.poles_r_max) for _ in range(nz)]  #Real
+        bounds_poles+=[(bounds.poles_phi_min,bounds.poles_phi_max) for _ in range(nz)]  #Imag
 
-    ret = bounds_zeros+bounds_poles
+    ret = bounds_zeros_r+bounds_zeros_phi
     return ret
 
-def get_system(type:str,phase:str,coeffs_per_stage:list[int]):
+def get_system(type:str,phases_per_stage:list[str],coeffs_per_stage:list[int]):
     """
     Get the required bounds and settings for the specified parameters. 
     Return the initialiased poles and zeros and the bounds to be given to optimiser
@@ -266,86 +288,97 @@ def get_system(type:str,phase:str,coeffs_per_stage:list[int]):
         phase:   'MIN' or 'LINEAR' or None
     """
     nz = sum(coeffs_per_stage)*2 
-    if type=='FIR':
-        if phase == 'MIN':
-            set_poles = np.zeros(nz)
+    #   Need to claculate the correct size for set_poles
+    #   Need a list of bounds namespaces
+    set_poles_size = 0
+    bounds_list = []
+    for phase in phases_per_stage:
+        if type=='FIR':
+            if phase == 'MIN':
+                set_poles_size += nz
+            elif phase == 'LINEAR':
+                set_poles_size += nz
+        elif 'IIR':
+            set_poles = None
+            bounds = bounds
+        else:
+            raise ValueError('Unknown Filter Type')
+        
+        if phase is None :
+            bounds_list.append( get_bounds(phase))
+        elif phase == 'MIN' and type=='FIR':
+            bounds_list.append( get_bounds(phase))
         elif phase == 'LINEAR':
-            set_poles = np.zeros(nz//2)
-    elif 'IIR':
-        set_poles = None
-        bounds = bounds
-    else:
-        raise ValueError('Unknown Filter Type')
-    
-    if phase is None :
-        bounds = get_bounds(phase)
-    elif phase == 'MIN' and type=='FIR':
-        bounds = get_bounds(phase)
-    elif phase == 'LINEAR':
-        bounds = get_bounds(phase)
-
-    else:
-        raise ValueError('Unknown Type/Phase pair')
-    m0 = initialise_model(nz,bounds,set_poles)
-    ret_bounds = sort_bounds(bounds,nz,set_poles)
+            bounds_list.append( get_bounds(phase))
+        else:
+            raise ValueError('Unknown Type/Phase pair')
+    set_poles = np.zeros(set_poles_size)
+    m0 = initialise_model(coeffs_per_stage,bounds_list,set_poles)
+    ret_bounds = sort_bounds(bounds_list,coeffs_per_stage,set_poles)
     return m0,ret_bounds,set_poles,nz
 
 
-def sort_mpost(m_post,nz,set_poles,phase):
-   
+def sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage):
+    pandz_list = []
+    print(m_post.shape)
+    print(nz)
+    for i,(phase,nc) in enumerate(zip(phases_per_stage,coeffs_per_stage)):
+        if phase=='MIN' or phase == None:
+            if set_poles is not None:
+                poles_final = set_poles[i*nc:(i+1)*nc]*np.exp(1j*set_poles[nz//2 + i*nc:nz//2 + (i+1)*nc]) #+ 1j*set_poles[nz//2:]
+            else:
+                poles_final = m_post[nz:(3*nz)//2]*np.exp(1j*m_post[(3*nz)//2:])#+1j*m_post[(3*nz)//2:]
 
-    if phase=='MIN' or phase == None:
-        if set_poles is not None:
-                poles_final = set_poles[:nz//2]*np.exp(1j*set_poles[nz//2:]) #+ 1j*set_poles[nz//2:]
-        else:
-            poles_final = m_post[nz:(3*nz)//2]*np.exp(1j*m_post[(3*nz)//2:])#+1j*m_post[(3*nz)//2:]
-
-        zeros_final = m_post[:nz//2]*np.exp(1j*m_post[nz//2:nz]) #+ 1j*m_post[nz//2:nz]
-
-
-        pandz = np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),np.concatenate([zeros_final,np.conj(zeros_final)])])
-        return pandz
-    
-
-    elif phase=='LINEAR':
-        if set_poles is not None:
-            poles_final = set_poles[:nz//4]*np.exp(1j*set_poles[nz//4:])
-        else:
-            poles_final = m_post[nz//2:(3*nz)//4]*np.exp(1j*m_post[(3*nz)//4:])
-
-        zeros_final = m_post[:nz//4]*np.exp( 1j*m_post[nz//4:nz//2])
-
-        #   we need to check the norm here for the reciprocals
-        #mask = np.sqrt(zeros_final.real**2+zeros_final.imag**2) >1
-        zeros_final = np.concatenate([zeros_final,1/zeros_final])
-        if poles_final.shape[0]!=zeros_final.shape[0]:
-            to_pad = poles_final.shape[0]-zeros_final.shape[0]
-            if to_pad >1:
-                poles_final = poles_final[:poles_final.shape[0]-to_pad]
-            elif to_pad <1:
-                poles_final = np.concatenate([poles_final,np.zeros(-to_pad)])
-
-        pandz = np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),
-                                 np.concatenate([zeros_final,np.conj(zeros_final)])])
-        return pandz
+            zeros_final = m_post[i*nc:(i+1)*nc]*np.exp(1j*m_post[nz//2 + i*nc:nz//2 + (i+1)*nc]) #+ 1j*m_post[nz//2:nz]
 
 
-def main_lbfgs(paths,coeffs_per_stage,f_type='FIR',f_phase='MIN',nepochs=100,new_optimise=True,ftol=1e-3,sinc_dec = [256]):
+            pandz_list.append(np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),np.concatenate([zeros_final,np.conj(zeros_final)])]))
+           
+        
+
+        elif phase=='LINEAR':
+            if set_poles is not None:
+                poles_final = set_poles[i*nc:(i+1)*nc]*np.exp(1j*set_poles[nz//2 + i*nc:nz//2 + (i+1)*nc])
+            else:
+                poles_final = m_post[nz//2:(3*nz)//4]*np.exp(1j*m_post[(3*nz)//4:])
+
+            zeros_final = m_post[i*nc:(i+1)*nc]*np.exp( 1j*m_post[nz//2 + i*nc:nz//2 + (i+1)*nc])
+
+        
+            zeros_final = np.concatenate([zeros_final,1/zeros_final])
+            if poles_final.shape[0]!=zeros_final.shape[0]:
+                to_pad = poles_final.shape[0]-zeros_final.shape[0]
+                if to_pad >1:
+                    poles_final = poles_final[:poles_final.shape[0]-to_pad]
+                elif to_pad <1:
+                    poles_final = np.concatenate([poles_final,np.zeros(-to_pad)])
+
+            pandz_list.append(np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),
+                                    np.concatenate([zeros_final,np.conj(zeros_final)])]))
+            
+    pandz = np.vstack(pandz_list)
+    return pandz
+
+
+def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,f_type='FIR',f_phase='MIN',nepochs=100,new_optimise=True,ftol=1e-3,sinc_dec = [256]):
     FIGPATH = 'figures/bfgs'
     X_spectra,Y_spectra,frequencies,pulses = load_datasets(paths,sinc_dec)
     print('Datasets Loaded')
+
     if new_optimise:
-        m0,bounds,set_poles,nz = get_system(f_type,f_phase,coeffs_per_stage)
+        m0,bounds,set_poles,nz = get_system(f_type,phases_per_stage,coeffs_per_stage)
         print('Got Settings')
         print('Optimsing...')
-        if f_phase == 'LINEAR':
-            nz_old = nz
-            nz = nz//2
+  
+        nz =  sum(coeffs_per_stage)*2
+
         print(m0)
+        print(nz)
+     
         res = minimize(
-                lambda m:objective_lbfgs(m,nz,X_spectra,Y_spectra,frequencies,scipy=True,coeffs_per_stage=coeffs_per_stage,set_poles = set_poles,phase=f_phase),
+                lambda m:objective_lbfgs(m,nz,X_spectra,Y_spectra,frequencies,phases_per_stage,scipy=True,coeffs_per_stage=coeffs_per_stage,set_poles = set_poles,phase=f_phase),
                 x0=m0,
-                #jac = lambda m: jac_lbfgs(m,nz,X_spectra,Y_spectra,frequencies,scipy=True,coeffs_per_stage=coeffs_per_stage,set_poles = set_poles,phase=f_phase),
+                #jac = lambda m: jac_lbfgs(m,nz,X_spectra,Y_spectra,frequencies,phases_per_stage,scipy=True,coeffs_per_stage=coeffs_per_stage,set_poles = set_poles,phase=f_phase),
                 method='L-BFGS-B',  
                 bounds=bounds,
                 callback=callback_lbfgs,
@@ -358,9 +391,8 @@ def main_lbfgs(paths,coeffs_per_stage,f_type='FIR',f_phase='MIN',nepochs=100,new
         print('Done!')
         print(res)
         m_post = res.x
-        if f_phase == 'LINEAR':
-            nz = nz_old
-        pandz = sort_mpost(m_post,nz,set_poles,f_phase)
+    
+        pandz = sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage)
         np.save(f'{FIGPATH}/PolesandZeros.npy',pandz)
         print('Plotting')
         #out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH)
@@ -382,7 +414,7 @@ if __name__ == '__main__':
     paths = [
                 Path('/run/media/obic/SSD/test/ADC_Filter_2'),
                 Path('/run/media/obic/SSD/test/ADC_Filter_3'),
-                #Path('/run/media/obic/SSD/test/ADC_Filter_4')    
+                Path('/run/media/obic/SSD/test/ADC_Filter_4')    
             ]
     #   Number of roots in the top half of the compelx plane
     #   These will by conjugated, so the total order will be twice this number
@@ -392,10 +424,10 @@ if __name__ == '__main__':
     #   We looking for a cascade of two linear filters followed by two min phase filters
 
     #   coeffs per stage is the number of coeffs we seek, so for minphase it'll be 2 times this and 4 times this for linear
-    coeffs_per_stage = [64,64]
-    phases_per_stage = ['LINEAR','LINEAR']
+    coeffs_per_stage = [32,32]
+    phases_per_stage = ['LINEAR','MIN']
     #   Decimations for the sinc filters
-    sinc_dec = [2,4,16]
+    sinc_dec = None#[2,4,16]
     
     new_optimise = True
-    main_lbfgs(paths,coeffs_per_stage,new_optimise=new_optimise,ftol=1e-8,sinc_dec = sinc_dec,f_phase='LINEAR',nepochs=100 )
+    main_lbfgs(paths,coeffs_per_stage,phases_per_stage,new_optimise=new_optimise,ftol=1e-5,sinc_dec = sinc_dec,f_phase='LINEAR',nepochs=20)

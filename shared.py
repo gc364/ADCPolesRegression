@@ -370,7 +370,7 @@ def apply_stages(poles,zeros,X_spectra,Y_spectra,frequencies,coeffs_per_stage,da
             X_i = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,True)
             if transfer_function:
                 X_i = [X_i[i]-np.log10(X_spectra[i].__abs__()+1e-5) for i in range(len(X_spectra))]
-        else:
+        elif i == len(stages)-1:
             l = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,False)
             X_fin = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,True)
             if transfer_function:
@@ -378,6 +378,10 @@ def apply_stages(poles,zeros,X_spectra,Y_spectra,frequencies,coeffs_per_stage,da
     if data_only:
         return X_fin
     return l
+
+
+
+
 def compute_group_delay(phase,frequencies):
     return -np.diff(phase)/np.diff(frequencies)
 
@@ -434,11 +438,19 @@ def compute_thd(X_spectra,Y_spectra,input_freqs,data_frequencies,num_harmonics=5
     ret = 20*np.log10((thd_out-thd_in))
 
     return ret, input_freqs[sorted_freq_ind]
-
+def calculate_gain(X,Y):
+    """Return gain in dB between y and x"""
+    return 20*np.log10(np.abs(Y)/np.abs(X))
 NICE_FIGURES = Path('./figures/nice_figures')
 def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_frequencies,coeffs_per_stage):
     NICE_FIGURES.mkdir(exist_ok=True)
     
+    #   For the corner frequency we define it as the frequency where 
+    #   the gain has dropped by 3dB
+
+
+
+
     nc_path =  list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
 
     b,a = to_coefficents(poles,zeros)
@@ -467,9 +479,11 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     ax[0].set_xlabel(r'$\omega$ (rad/s)')
     ax[0].set_ylabel(r'Response (dB)')
     ax[1].plot(frequencies_rad,phase)
-    ax[1].semilogx()
+    #ax[1].semilogx()
     ax[1].set_xlabel(r'$\omega$ (rad/s)')
     ax[1].set_ylabel(r'Phase (rad)')
+    ax[1].set_xlim(0,250)
+    ax[0].axvline(206.5*2*np.pi)
     plt.savefig(NICE_FIGURES.joinpath('frequency_response.png'),dpi=256)
     plt.close()
 
@@ -480,9 +494,10 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     ax[0].set_xlabel(r'$f$ (Hz)')
     ax[0].set_ylabel(r'Response (dB)')
     ax[1].plot(frequencies_hz,phase)
-    ax[1].semilogx()
+    #ax[1].semilogx()
     ax[1].set_xlabel(r'$f$ (Hz)')
     ax[1].set_ylabel(r'Phase (rad)')
+    ax[0].axvline(206.5)
     plt.savefig(NICE_FIGURES.joinpath('frequency_response_hz.png'),dpi=256)
     plt.close()
     
@@ -520,13 +535,14 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     #   Group delay
 
     fig,ax = plt.subplots(layout='constrained')
-    _,group_delay = scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
-    #group_delay = compute_group_delay(phase,frequencies_rad)
-    inds = range(0,group_delay.shape[0])#group_delay <=0
-    print(group_delay)
-    ax.plot(frequencies_hz[:][inds],group_delay[inds])
+    w,group_delay = scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
+
+  
+    ax.plot(w/(np.pi*2),group_delay)
     ax.set_xlabel('Frequency (Hz)')
-    ax.set_ylabel('Group Delay (s/rad)')
+    ax.set_ylabel('Group Delay (s)')
+    ax.set_xlim(0,250)
+    #ax.set_ylim(-250,250)
     plt.savefig(NICE_FIGURES.joinpath('group_delay.png'),dpi=256)
     plt.close()
 
@@ -604,6 +620,20 @@ def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGP
     if coeffs_per_stage is not None:
         data_reconst = apply_stages(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,coeffs_per_stage,True)
     #data_reconst = g_scipy(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,True)
+
+    gain = calculate_gain(abs(X_spectra[0]),10**data_reconst[0])
+
+    fig,ax =plt.subplots()
+    ax.plot(frequencies,gain)
+    ax.set_ylabel('Gain (dB)')
+    ax.axhline(128,color = 'k',linestyle='--')
+    ax.axhline(64,color = 'k',linestyle='--')
+    ax.axhline(32,color = 'k',linestyle='--')
+    ax.axhline(16,color = 'k',linestyle='--')
+    ax.set_xlim(0,500)
+    #ax.set_ylim(0,100)
+    ax.set_xlabel('Frequency (Hz)')
+    plt.savefig(f'{FIGPATH}/gain.png',dpi=256)
 
     fig,ax = plt.subplots(2,layout='constrained')
     H = calculate_transfer_function(poles_final,zeros_final,2*np.pi*frequencies)
