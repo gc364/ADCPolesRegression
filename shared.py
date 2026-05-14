@@ -487,6 +487,23 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     plt.savefig(NICE_FIGURES.joinpath('frequency_response.png'),dpi=256)
     plt.close()
 
+    #   Transfer function (rad)
+    fig,ax  = plt.subplots(2,layout='constrained')
+    ax[0].plot(frequencies_rad,20*np.log10(H.real.__abs__()))
+
+    #ax[0].semilogx()
+    ax[0].set_xlim(0,300*2*np.pi)
+    ax[0].set_xlabel(r'$\omega$ (rad/s)')
+    ax[0].set_ylabel(r'Response (dB)')
+    ax[1].plot(frequencies_rad,phase)
+    #ax[1].semilogx()
+    ax[1].set_xlabel(r'$\omega$ (rad/s)')
+    ax[1].set_ylabel(r'Phase (rad)')
+    ax[1].set_xlim(0,300*2*np.pi)
+    ax[0].axvline(206.5*2*np.pi)
+    plt.savefig(NICE_FIGURES.joinpath('frequency_response_non_log.png'),dpi=256)
+    plt.close()
+
     #   Transfer function (Hz)
     fig,ax  = plt.subplots(2,layout='constrained')
     ax[0].plot(frequencies_hz,20*np.log10(H))
@@ -500,18 +517,27 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     ax[0].axvline(206.5)
     plt.savefig(NICE_FIGURES.joinpath('frequency_response_hz.png'),dpi=256)
     plt.close()
-    
+
+
+    tf = 20*np.log10(H.real.__abs__())
+    ind_250 = np.argmin(abs(frequencies_rad-(300*2*np.pi)))
+    tf = tf[:ind_250]
+    max_gain = np.argmax(tf)
+    corner_freq_ind = np.argmin(abs(tf-tf[max_gain]-3))
+    corner_freq = frequencies_rad[corner_freq_ind]
+    print(f'Located Corner Frequency:   {corner_freq/(2*np.pi)}')
     # #   Time domain impulse/step response
     # times = np.linspace(0,frequencies_hz.shape[0],frequencies_hz.shape[0])
-    
-    # t,impulse = scipy.signal.impulse((b_norm,a_norm),T=times)
+    # assert b.shape[0]==a.shape[0]
+    # system = scipy.signal.TransferFunction(b,a)
+    # t,impulse = scipy.signal.impulse(system,T=times)
     # print(impulse)
     # fig,(ax,ax1) = plt.subplots(2,layout='constrained')
     # ax.plot(t,impulse)
     # ax.set_xlabel('samples')
     # ax.set_ylabel('Impulse Response')
 
-    # t,step = scipy.signal.step((b_norm,a_norm),T=times)
+    # t,step = scipy.signal.step((b,a),T=times)
 
     # ax1.plot(t,step)
     # ax1.set_xlabel('samples')
@@ -535,10 +561,10 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     #   Group delay
 
     fig,ax = plt.subplots(layout='constrained')
-    w,group_delay = scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
-
+    #w,group_delay = scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
+    group_delay = compute_group_delay(np.unwrap(phase),frequencies_hz)
   
-    ax.plot(w/(np.pi*2),group_delay)
+    ax.plot(frequencies_hz[1:],group_delay)
     ax.set_xlabel('Frequency (Hz)')
     ax.set_ylabel('Group Delay (s)')
     ax.set_xlim(0,250)

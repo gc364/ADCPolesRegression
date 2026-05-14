@@ -185,7 +185,7 @@ def initialise_model(coeffs_per_stage:list[int],bounds_list:list[dict],set_poles
         else:
             if bounds.phase == 'MIN' or bounds.phase is None:
                 phi = np.linspace(0,np.pi,nz)
-                r = np.ones(nz)#-0.3
+                r = np.ones(nz)-0.3
                 zeros_list_r.append(r)
                 zeros_list_phi.append(phi)
             elif bounds.phase=='LINEAR':
@@ -223,9 +223,9 @@ def get_bounds(phase:str):
     bounds = SimpleNamespace(**bounds)
 
     if phase == 'MIN':
-        bounds.zeros_r_max = 1
+        bounds.zeros_r_max = 0.99
         bounds.zeros_phi_max = np.pi
-        bounds.poles_r_max = 1
+        bounds.poles_r_max = 0.99
         bounds.poles_phi_max = np.pi
 
 
@@ -414,7 +414,8 @@ if __name__ == '__main__':
     paths = [
                 Path('/run/media/obic/SSD/test/ADC_Filter_2'),
                 Path('/run/media/obic/SSD/test/ADC_Filter_3'),
-                Path('/run/media/obic/SSD/test/ADC_Filter_4')    
+                Path('/run/media/obic/SSD/test/ADC_Filter_4'),
+                Path('/run/media/obic/SSD/test/ADC_Filter_5')    
             ]
     #   Number of roots in the top half of the compelx plane
     #   These will by conjugated, so the total order will be twice this number
@@ -424,10 +425,10 @@ if __name__ == '__main__':
     #   We looking for a cascade of two linear filters followed by two min phase filters
 
     #   coeffs per stage is the number of coeffs we seek, so for minphase it'll be 2 times this and 4 times this for linear
-    coeffs_per_stage = [32,32]
-    phases_per_stage = ['LINEAR','MIN']
+    coeffs_per_stage = [128]
+    phases_per_stage = ['MIN']
     #   Decimations for the sinc filters
     sinc_dec = None#[2,4,16]
     
     new_optimise = True
-    main_lbfgs(paths,coeffs_per_stage,phases_per_stage,new_optimise=new_optimise,ftol=1e-5,sinc_dec = sinc_dec,f_phase='LINEAR',nepochs=20)
+    main_lbfgs(paths,coeffs_per_stage,phases_per_stage,new_optimise=new_optimise,ftol=1e-5,sinc_dec = sinc_dec,f_phase='LINEAR',nepochs=100)
