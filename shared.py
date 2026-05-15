@@ -46,7 +46,7 @@ def sinc_filter_response(N: int,frequencies,f_mod: float = F_MOD_HIGH, n_points:
     H  : np.ndarray   Magnitude response (not dB)
     """
     h = sinc_filter_coeffs(N)
-    w, H = scipy.signal.freqz(h, worN=frequencies, fs=f_mod)
+    w, H = scipy.signal.freqz(h, worN=frequencies, fs=500*2*np.pi)
     #H_dB = 20 * np.log10(np.abs(H) + 1e-300)
     return w, H
 
@@ -209,10 +209,10 @@ def scipy_frequency_response(poles,zeros,frequencies=None,gain=1):
     """Compute the frequency response using scipy"""
   
     if type(frequencies) == None:
-        w,H = freqz_zpk(zeros,poles,gain,worN=1500,fs=2*np.pi*500)
+        w,H = freqz_zpk(zeros,poles,gain,worN=1500,fs=4*np.pi*500)
         
         return w,H
-    w,H = freqz_zpk(zeros,poles,gain,frequencies,fs=2*np.pi*500)
+    w,H = freqz_zpk(zeros,poles,gain,frequencies,fs=4*np.pi*500)
   
     return w,H
 
@@ -256,13 +256,14 @@ def load_xy(pulses_path,data_path):
     length_seconds = x_cycles/X_known_freqs
     #   List of cut observed time series
     y_time  = cut_timeseries(y,chattr,x_start_times,length_seconds)
-
-    n = 6000    #   The length of the spectra
+    maxs = [y.shape[0] for y in y_time]
+    n = 6000#max(maxs)#6000    #   The length of the spectra
+    #print(n)
     #   Calculate Y spectra
     Y_spectra = [np.fft.rfft(y,n=n) for y in y_time]
     Y_frequencies = np.fft.rfftfreq(n=n,d=1/chattr['sample_rate_hz'])
 
-    target_high = 1500  #The highest frequency we're interested in
+    target_high = 500  #The highest frequency we're interested in
     df_y = Y_frequencies[1]-Y_frequencies[0]
     max_f = Y_frequencies.max()
     #We need to pad the frequencies to get to 1500 Hz
@@ -298,6 +299,7 @@ def calculate_transfer_function(poles,zeros,omega):
     assert poles.shape[0]==zeros.shape[0]
     num=1
     den = 1
+    omega = np.exp(omega*1j)
     for ma,mb in zip(poles,zeros):
         num *=(omega-mb)
         den *= (omega-ma)
@@ -340,13 +342,13 @@ def g_scipy(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],fr
         raise Exception('Poles and zeros are not the same size')
     zeros = np.concatenate([zeros,np.conj(zeros)])
     poles = np.concatenate([poles,np.conj(poles)])
-    w,h  = scipy_frequency_response(poles,zeros,2*np.pi*frequencies)
+    w,h  = scipy_frequency_response(poles,zeros,2*np.pi*frequencies,gain=1)#0.05*10**8)
  
     ret = []
     for x in X_spectra:
         spec = h*x
         #   zero anything past nyqvist
-        ind = np.argmin(abs(frequencies-250))
+        ind = np.argmin(abs(frequencies-500))
         spec[ind:] = 0
         ret.append(spec)
     ret = data_transform(ret)
@@ -482,7 +484,7 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     #ax[1].semilogx()
     ax[1].set_xlabel(r'$\omega$ (rad/s)')
     ax[1].set_ylabel(r'Phase (rad)')
-    ax[1].set_xlim(0,250)
+    ax[1].set_xlim(0,300*2*np.pi)
     ax[0].axvline(206.5*2*np.pi)
     plt.savefig(NICE_FIGURES.joinpath('frequency_response.png'),dpi=256)
     plt.close()
@@ -492,14 +494,14 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     ax[0].plot(frequencies_rad,20*np.log10(H.real.__abs__()))
 
     #ax[0].semilogx()
-    ax[0].set_xlim(0,300*2*np.pi)
+    ax[0].set_xlim(0,500*2*np.pi)
     ax[0].set_xlabel(r'$\omega$ (rad/s)')
     ax[0].set_ylabel(r'Response (dB)')
     ax[1].plot(frequencies_rad,phase)
     #ax[1].semilogx()
     ax[1].set_xlabel(r'$\omega$ (rad/s)')
     ax[1].set_ylabel(r'Phase (rad)')
-    ax[1].set_xlim(0,300*2*np.pi)
+    ax[1].set_xlim(0,500*2*np.pi)
     ax[0].axvline(206.5*2*np.pi)
     plt.savefig(NICE_FIGURES.joinpath('frequency_response_non_log.png'),dpi=256)
     plt.close()
@@ -523,27 +525,34 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     ind_250 = np.argmin(abs(frequencies_rad-(300*2*np.pi)))
     tf = tf[:ind_250]
     max_gain = np.argmax(tf)
-    corner_freq_ind = np.argmin(abs(tf-tf[max_gain]-3))
+    corner_freq_ind = np.argmin(abs(tf[max_gain:]-(tf[max_gain]-3)))+max_gain
     corner_freq = frequencies_rad[corner_freq_ind]
-    print(f'Located Corner Frequency:   {corner_freq/(2*np.pi)}')
+    print(f'Located Corner Frequency:   {corner_freq/(2*np.pi)} Hz')
     # #   Time domain impulse/step response
-    # times = np.linspace(0,frequencies_hz.shape[0],frequencies_hz.shape[0])
-    # assert b.shape[0]==a.shape[0]
+    times = np.linspace(0,frequencies_hz.shape[0],frequencies_hz.shape[0])/500
+    assert b.shape[0]==a.shape[0]
+    #b,a  = scipy.signal.normalize(b,a)
     # system = scipy.signal.TransferFunction(b,a)
-    # t,impulse = scipy.signal.impulse(system,T=times)
-    # print(impulse)
-    # fig,(ax,ax1) = plt.subplots(2,layout='constrained')
-    # ax.plot(t,impulse)
-    # ax.set_xlabel('samples')
-    # ax.set_ylabel('Impulse Response')
+    # print(system.num.shape)
+    # print(system.den.shape)
+    # system.num = b
+    # system.den = a
+    # print(system.num.shape)
+    # print(system.den.shape)
+    t,impulse = scipy.signal.impulse((zeros,poles,0.05*10**8),T=times)
+    print(impulse)
+    fig,(ax,ax1) = plt.subplots(2,layout='constrained')
+    ax.plot(t,impulse)
+    ax.set_xlabel('samples')
+    ax.set_ylabel('Impulse Response')
+    print(poles)
+    t,step = scipy.signal.step((zeros,poles,0.05*10**8),T=times)
 
-    # t,step = scipy.signal.step((b,a),T=times)
-
-    # ax1.plot(t,step)
-    # ax1.set_xlabel('samples')
-    # ax1.set_ylabel('Step Response')
-    # plt.savefig(NICE_FIGURES.joinpath('impulse_step_response.png'),dpi=256)
-    # plt.close()
+    ax1.plot(t,step)
+    ax1.set_xlabel('samples')
+    ax1.set_ylabel('Step Response')
+    plt.savefig(NICE_FIGURES.joinpath('impulse_step_response.png'),dpi=256)
+    plt.close()
 
 
     #   Coefficient spectra
@@ -663,7 +672,8 @@ def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGP
 
     fig,ax = plt.subplots(2,layout='constrained')
     H = calculate_transfer_function(poles_final,zeros_final,2*np.pi*frequencies)
-    ax[0].plot(frequencies,H.real.__abs__()/(2*np.pi) + 1e-5)
+    ax[0].plot(frequencies,20*np.log10(H.real.__abs__()))#/(2*np.pi) + 1e-5)
+    ax[0].semilogx()
     ax[1].set_xlabel('Frequency (Hz)')
     ax[0].set_ylabel(r'$\mathfrak{R}$')
     ax[1].set_ylabel(r'$\mathfrak{I}$')

@@ -183,7 +183,7 @@ def initialise_model(coeffs_per_stage:list[int],bounds_list:list[dict],set_poles
                                         np.random.uniform(bounds.zeros_phi_min,bounds.zeros_phi_max,nz)
                                         ]))
         else:
-            if bounds.phase == 'MIN' or bounds.phase is None:
+            if (bounds.phase == 'MIN') or (bounds.phase is None):
                 phi = np.linspace(0,np.pi,nz)
                 r = np.ones(nz)-0.3
                 zeros_list_r.append(r)
@@ -428,7 +428,7 @@ if __name__ == '__main__':
     coeffs_per_stage = [128]
     phases_per_stage = ['MIN']
     #   Decimations for the sinc filters
-    sinc_dec = None#[2,4,16]
+    sinc_dec = [2,4,16]
     
     new_optimise = True
     main_lbfgs(paths,coeffs_per_stage,phases_per_stage,new_optimise=new_optimise,ftol=1e-5,sinc_dec = sinc_dec,f_phase='LINEAR',nepochs=100)

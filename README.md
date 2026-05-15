@@ -23,5 +23,6 @@ These are some of the values of things from the nanometric filter that the regre
 
     Stop Band:  0.5*sample_rate (250Hz)
     Corner Freq (-3dB): 0.413*sampling_rate (206.5Hz)
-    Group Delay
+    Group Delay:    0.01s for min-phase and 0.126s for linear phase
+
 
