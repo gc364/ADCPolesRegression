@@ -1,80 +1,26 @@
 import numpy as np
-import scipy
-import matplotlib.pyplot as plt
-import netCDF4 as nc
 from pathlib import Path
-import tqdm
-from numpy.polynomial import Polynomial
 from filter_coeffs import *
 from scipy.optimize import minimize
 from shared import *
 from types import SimpleNamespace
 
 
-#   TODO:   All these need to be constrained in polar coordinates not cartesian
-#           Easiest to make the model vector in polar then convert to cartesian for
-#           computations then back again. This means the bounds will be for r and phi
-
-def polar_to_cartesian(poles,zeros):
-    nz = zeros.shape[0]
-
-    r_z = zeros[:nz]
-    phi_z  = zeros[nz:]
-
-    ret_zeros = np.zeros_like(zeros)
-
-    real_zeros,imag_zeros = r_z*np.cos(phi_z),r_z*np.sin(phi_z)
-    ret_zeros[:] = np.concatenate([real_zeros,imag_zeros])
-
-    r_p = poles[:nz]
-    phi_p  = poles[nz:]
-
-    ret_poles = np.zeros_like(poles)
-
-    real_poles,imag_poles = r_p*np.cos(phi_p),r_p*np.sin(phi_p)
-    ret_poles[:] = np.concatenate([real_poles,imag_poles])
-
-    return ret_poles, ret_zeros 
-
-def cartesian_to_polar(poles,zeros):
-    nz = zeros.shape[0]
-
-    real_z = zeros[:nz]
-    imag_z  = zeros[nz:]
-
-    ret_zeros = np.zeros_like(zeros)
-
-    r_z,phi_z = np.sqrt(real_z**2 + imag_z**2),np.arctan2(imag_z,real_z)
-    ret_zeros[:] = np.concatenate([r_z,phi_z])
-
-    real_p = poles[:nz]
-    imag_p  = poles[nz:]
-
-    ret_poles = np.zeros_like(poles)
-
-    real_poles,imag_poles = np.sqrt(real_p**2 + imag_p**2),np.arctan2(imag_p,real_p)
-    ret_poles[:] = np.concatenate([real_poles,imag_poles])
-
-    return ret_poles, ret_zeros 
-
-
-
 def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
-                    scipy=False,coeffs_per_stage=None,set_poles=None,phase='MIN'):
+                    scipy=False,coeffs_per_stage=None,set_poles=None):
 
-    #   changing to cartesian from polar
     zeros_list = []
     poles_list = []
   
     
     for i,(phase,nc) in enumerate(zip(phases_per_stage,coeffs_per_stage)):
-        zeros = m[i*nc:(i+1)*nc]*np.exp(1j* m[(nzeros//2)+(i*nc):(nzeros//2)+((i+1)*nc)]) #+  m[nzeros//2:nzeros]*1j
-        #print(f'Radius Start:   {i*nc} \n Radius End:   {(i+1)*nc}  \n Phase Start: {(nzeros//2)+(i*nc)}    \n  Phase end:  {(nzeros//2)+((i+1)*nc)}')
+        zeros = m[i*nc:(i+1)*nc]*np.exp(1j* m[(nzeros//2)+(i*nc):(nzeros//2)+((i+1)*nc)]) 
+
         if phase == 'LINEAR':
             zeros = np.concatenate([zeros,1/zeros])
 
         if set_poles is None:
-            poles = m[nzeros:(3*nzeros)//2]*np.exp(1j*m[(3*nzeros)//2:])#+m[(3*nzeros)//2:]*1j
+            poles = m[nzeros:(3*nzeros)//2]*np.exp(1j*m[(3*nzeros)//2:])
         else:
             poles = set_poles
             poles = poles[i*nc:(i+1)*nc]*np.exp(1j*poles[(nzeros//2)+(i*nc):(nzeros//2)+((i+1)*nc)])
@@ -101,39 +47,16 @@ def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
     
     return np.sqrt(l.__abs__()@l.__abs__().T)
 
-def jac_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,scipy=False,coeffs_per_stage=None,set_poles=None,phase='MIN'):
 
-    #   I think we need to scale the angular part of g by r (the top half of g)
-
-    g = np.zeros_like(m)
-    eps = 1e-5
-    
-    for i in range(m.shape[0]):
-        mn = m.copy()
-        mn[i]-= eps
-        lower = objective_lbfgs(mn,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
-                                scipy=scipy,coeffs_per_stage=coeffs_per_stage,
-                                set_poles=set_poles,phase=phase)
-        mp = m.copy()
-        mp[i]+= eps
-        upper = objective_lbfgs(mp,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
-                                scipy=scipy,coeffs_per_stage=coeffs_per_stage,
-                                set_poles=set_poles,phase=phase)
-
-        g[i] = (upper-lower)/eps
-
-    #g[m.shape[0]//2:] *= 1/g[:m.shape[0]//2]
-
-    return g
 
 def callback_lbfgs(intermediate_result):
-    print(f'Value: {intermediate_result.x}')
+    #print(f'Value: {intermediate_result.x}')
     print(f'Iteration Loss: {intermediate_result.fun}')
     
     return
 
 
-def load_datasets(paths:list[Path],sinc_dec=None):
+def load_datasets(paths:list[Path],workdir,sinc_dec=None):
     """
     load and concatenate multiple datasets.
     
@@ -148,10 +71,10 @@ def load_datasets(paths:list[Path],sinc_dec=None):
     X_spectra = []
     Y_spectra = []
     pulses = np.zeros(shape=(1,4))
-    for workdir in paths:
-        nc_path = list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
-        pulses_path = workdir.joinpath('processed/pulses.txt')
-        X_spectra_i,Y_spectra_i,frequencies  = load_xy(pulses_path,nc_path)
+    for datadir in paths:
+        nc_path = list(datadir.joinpath('processed/netcdf').glob('*.nc'))[0]
+        pulses_path = datadir.joinpath('processed/pulses.txt')
+        X_spectra_i,Y_spectra_i,frequencies  = load_xy(pulses_path,nc_path,workdir)
         pulses_i = load_pulses(pulses_path)
         X_spectra+=X_spectra_i
         Y_spectra+=Y_spectra_i
@@ -288,10 +211,10 @@ def get_system(type:str,phases_per_stage:list[str],coeffs_per_stage:list[int]):
         phase:   'MIN' or 'LINEAR' or None
     """
     nz = sum(coeffs_per_stage)*2 
-    #   Need to claculate the correct size for set_poles
-    #   Need a list of bounds namespaces
+
     set_poles_size = 0
     bounds_list = []
+    
     for phase in phases_per_stage:
         if type=='FIR':
             if phase == 'MIN':
@@ -299,6 +222,7 @@ def get_system(type:str,phases_per_stage:list[str],coeffs_per_stage:list[int]):
             elif phase == 'LINEAR':
                 set_poles_size += nz
         elif 'IIR':
+            raise NotImplementedError("We can't do IIR Filters")
             set_poles = None
             bounds = bounds
         else:
@@ -312,6 +236,7 @@ def get_system(type:str,phases_per_stage:list[str],coeffs_per_stage:list[int]):
             bounds_list.append( get_bounds(phase))
         else:
             raise ValueError('Unknown Type/Phase pair')
+
     set_poles = np.zeros(set_poles_size)
     m0 = initialise_model(coeffs_per_stage,bounds_list,set_poles)
     ret_bounds = sort_bounds(bounds_list,coeffs_per_stage,set_poles)
@@ -320,22 +245,20 @@ def get_system(type:str,phases_per_stage:list[str],coeffs_per_stage:list[int]):
 
 def sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage):
     pandz_list = []
-    print(m_post.shape)
-    print(nz)
+   
     for i,(phase,nc) in enumerate(zip(phases_per_stage,coeffs_per_stage)):
         if phase=='MIN' or phase == None:
             if set_poles is not None:
-                poles_final = set_poles[i*nc:(i+1)*nc]*np.exp(1j*set_poles[nz//2 + i*nc:nz//2 + (i+1)*nc]) #+ 1j*set_poles[nz//2:]
+                poles_final = set_poles[i*nc:(i+1)*nc]*np.exp(1j*set_poles[nz//2 + i*nc:nz//2 + (i+1)*nc]) 
             else:
-                poles_final = m_post[nz:(3*nz)//2]*np.exp(1j*m_post[(3*nz)//2:])#+1j*m_post[(3*nz)//2:]
+                poles_final = m_post[nz:(3*nz)//2]*np.exp(1j*m_post[(3*nz)//2:])
 
-            zeros_final = m_post[i*nc:(i+1)*nc]*np.exp(1j*m_post[nz//2 + i*nc:nz//2 + (i+1)*nc]) #+ 1j*m_post[nz//2:nz]
+            zeros_final = m_post[i*nc:(i+1)*nc]*np.exp(1j*m_post[nz//2 + i*nc:nz//2 + (i+1)*nc]) 
 
 
             pandz_list.append(np.column_stack([np.concatenate([poles_final,np.conj(poles_final)]),np.concatenate([zeros_final,np.conj(zeros_final)])]))
            
         
-
         elif phase=='LINEAR':
             if set_poles is not None:
                 poles_final = set_poles[i*nc:(i+1)*nc]*np.exp(1j*set_poles[nz//2 + i*nc:nz//2 + (i+1)*nc])
@@ -360,9 +283,11 @@ def sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage):
     return pandz
 
 
-def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,f_type='FIR',f_phase='MIN',nepochs=100,new_optimise=True,ftol=1e-3,sinc_dec = [256]):
-    FIGPATH = 'figures/bfgs'
-    X_spectra,Y_spectra,frequencies,pulses = load_datasets(paths,sinc_dec)
+def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optimise,ftol,sinc_dec):
+    
+    figpath = workdir.joinpath('figures/bfgs')
+    f_type='FIR'    #   Hardcoded as it can't handle IIR at all
+    X_spectra,Y_spectra,frequencies,pulses = load_datasets(paths,workdir,sinc_dec)
     print('Datasets Loaded')
 
     if new_optimise:
@@ -372,63 +297,34 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,f_type='FIR',f_phase='MIN
   
         nz =  sum(coeffs_per_stage)*2
 
-        print(m0)
-        print(nz)
-     
         res = minimize(
-                lambda m:objective_lbfgs(m,nz,X_spectra,Y_spectra,frequencies,phases_per_stage,scipy=True,coeffs_per_stage=coeffs_per_stage,set_poles = set_poles,phase=f_phase),
+                lambda m:objective_lbfgs(m,nz,X_spectra,Y_spectra,frequencies,phases_per_stage,scipy=True,coeffs_per_stage=coeffs_per_stage,set_poles = set_poles),
                 x0=m0,
-                #jac = lambda m: jac_lbfgs(m,nz,X_spectra,Y_spectra,frequencies,phases_per_stage,scipy=True,coeffs_per_stage=coeffs_per_stage,set_poles = set_poles,phase=f_phase),
-                method='L-BFGS-B',  
-                bounds=bounds,
-                callback=callback_lbfgs,
+                method='L-BFGS-B', 
                 options={
                          'maxiter':nepochs,
                          'ftol':ftol
-                         }   
-
+                         },
+                bounds=bounds,
+                callback=callback_lbfgs,
                 )
         print('Done!')
         print(res)
         m_post = res.x
     
         pandz = sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage)
-        np.save(f'{FIGPATH}/PolesandZeros.npy',pandz)
+        np.save(workdir.joinpath('results/PolesandZeros.npy'),pandz)
         print('Plotting')
-        #out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH)
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
 
     else:
-        pandz =  np.load(f'{FIGPATH}/PolesandZeros.npy')
+        pandz =  np.load(workdir.joinpath('results/PolesandZeros.npy'))
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
      
-    out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH)
-    create_nice_figures(poles_final,zeros_final,X_spectra,Y_spectra,paths[0],pulses,frequencies,coeffs_per_stage)
-    create_fir_filter_PZs()
+    out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,figpath)
+    create_nice_figures(poles_final,zeros_final,X_spectra,Y_spectra,paths[0],workdir,pulses,frequencies,coeffs_per_stage)
+    create_fir_filter_PZs(workdir)
     return
 
-if __name__ == '__main__':
-    #   Datasets to load
-    paths = [
-                Path('/run/media/obic/SSD/test/ADC_Filter_2'),
-                Path('/run/media/obic/SSD/test/ADC_Filter_3'),
-                Path('/run/media/obic/SSD/test/ADC_Filter_4'),
-                Path('/run/media/obic/SSD/test/ADC_Filter_5')    
-            ]
-    #   Number of roots in the top half of the compelx plane
-    #   These will by conjugated, so the total order will be twice this number
-    #   or in the case of linear phase will be 4 times this number from further symmetries
-    #   The numbers need to be divisible by 4 for linear phase.
-
-    #   We looking for a cascade of two linear filters followed by two min phase filters
-
-    #   coeffs per stage is the number of coeffs we seek, so for minphase it'll be 2 times this and 4 times this for linear
-    coeffs_per_stage = [128]
-    phases_per_stage = ['MIN']
-    #   Decimations for the sinc filters
-    sinc_dec = [2,4,16]
-    
-    new_optimise = True
-    main_lbfgs(paths,coeffs_per_stage,phases_per_stage,new_optimise=new_optimise,ftol=1e-5,sinc_dec = sinc_dec,f_phase='LINEAR',nepochs=100)

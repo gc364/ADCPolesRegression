@@ -2,14 +2,11 @@ import numpy as np
 import scipy
 import matplotlib.pyplot as plt
 import netCDF4 as nc
-from pathlib import Path
-import tqdm
 from numpy.polynomial import Polynomial
 from filter_coeffs import *
-from scipy.optimize import minimize
 import numpy.polynomial.polynomial as poly
-from scipy.signal import freqs_zpk,freqz_zpk
-from datetime import datetime
+from scipy.signal import freqz_zpk
+
 
 
 def sinc_filter_coeffs(N: int) -> np.ndarray:
@@ -68,7 +65,7 @@ def apply_sinc_filter(X: np.ndarray, N: int,frequencies) -> np.ndarray:
     y = X*h
     return y
 
-def create_fir_filter_PZs():
+def create_fir_filter_PZs(workdir):
     """This returns the zeros and poles for the FIR Filter as a good start point for the optimisation"""
     h1 = STAGE1_LINEAR  # ×2 decimation
     h2 = STAGE2_LINEAR  # ×2 decimation
@@ -112,9 +109,9 @@ def create_fir_filter_PZs():
     denominator = Polynomial(np.ones_like(H_cascade))
 
     zeros = numerator.roots()
-    print(zeros)
+  
     poles = denominator.roots()
-    print(poles)
+  
     # Frequency response at the sinc output rate
     X_frequencies = np.fft.rfftfreq(n=2*18001-1,d=1/(2*1500))
     X_frequencies[0]+=1e-5
@@ -127,7 +124,7 @@ def create_fir_filter_PZs():
     ax1.plot(w,20*np.log10(H.__abs__()))
     ax1.set_ylabel('Transfer function dB')
     ax1.semilogx()
-    plt.savefig('figures/fir_old.png')
+    plt.savefig(workdir.joinpath('figures/TI_response.png'))
 
     fig,ax = plt.subplots(5,layout='constrained',figsize=(8.2,11.7))
     print(f'Number of Zeros: {zeros.shape}')
@@ -168,11 +165,11 @@ def create_fir_filter_PZs():
 
 
 
-    plt.savefig('figures/fi_old_pandz.png',dpi=256)
+    plt.savefig(workdir.joinpath('figures/TI_Pandz.png'),dpi=256)
 
     return zeros,poles
 
-create_fir_filter_PZs()
+
 def load_pulses(pulses_path):
     pulses = np.loadtxt(pulses_path,delimiter='\t')
     return pulses
@@ -241,7 +238,7 @@ def data_transform(spectra):
     return ret
 
 
-def load_xy(pulses_path,data_path):
+def load_xy(pulses_path,data_path,workdir):
 
     pulses = load_pulses(pulses_path)
     dataset = nc.Dataset(data_path)
@@ -258,7 +255,7 @@ def load_xy(pulses_path,data_path):
     y_time  = cut_timeseries(y,chattr,x_start_times,length_seconds)
     maxs = [y.shape[0] for y in y_time]
     n = 6000#max(maxs)#6000    #   The length of the spectra
-    #print(n)
+  
     #   Calculate Y spectra
     Y_spectra = [np.fft.rfft(y,n=n) for y in y_time]
     Y_frequencies = np.fft.rfftfreq(n=n,d=1/chattr['sample_rate_hz'])
@@ -283,15 +280,11 @@ def load_xy(pulses_path,data_path):
     X_spectra = [np.fft.rfft(x,n=2*n-1) for x in x_timeseries]
     X_frequencies = np.fft.rfftfreq(n=2*n-1,d=1/(2*target_high))
     X_frequencies[0]+=1e-5
-    # fig,ax = plt.subplots()
-    # ax.plot(X_frequencies,X_spectra[-1]/X_spectra[-1].max())
-    # ax.plot(Y_frequencies,Y_spectra[-1]/Y_spectra[-1].max())
-    # print(max(X_frequencies),max(Y_frequencies))
-    # plt.savefig('test.png')
+ 
     
-    plot_xy(X_spectra,Y_spectra,X_frequencies,5,outfile='Pre_transform_data.png')
+    plot_xy(X_spectra,Y_spectra,X_frequencies,5,outfile=workdir.joinpath('figures/pre_transform_data.png'))
     Y_spectra = data_transform(Y_spectra)
-    plot_xy(X_spectra,Y_spectra,X_frequencies,5,outfile='Post_transform_data.png')
+    plot_xy(X_spectra,Y_spectra,X_frequencies,5,outfile=workdir.joinpath('figures/post_transform_data.png'))
     return X_spectra,Y_spectra,X_frequencies
 
 
@@ -310,9 +303,9 @@ def L2_norm(d_obs,d):
 
 
 def g(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequencies:np.ndarray,data_only=False):
-    """The forward model for a list of spectra and frequencies"""
+    """The forward model with the response computed using a custom implemetation"""
     ret = []
-    #   We only search for poles in the upper left quadrant, and append the remaining co
+
     zeros = np.concatenate([zeros,np.conj(zeros)])
     poles = np.concatenate([poles,np.conj(poles)])
     #   Do everything in rad/s and we have 
@@ -335,7 +328,7 @@ def g(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequenc
     return np.array(ret)
 
 def g_scipy(poles,zeros,X_spectra:list[np.ndarray],Y_spectra:list[np.ndarray],frequencies:np.ndarray,data_only=False):
-    """The forward model for a list of spectra and frequencies"""
+    """The forward model with the response computed by scipy"""
     ret = []
     #   We only search for poles in the upper left quadrant, and append the remaining co
     if zeros.shape[0]!=poles.shape[0]:
@@ -443,9 +436,10 @@ def compute_thd(X_spectra,Y_spectra,input_freqs,data_frequencies,num_harmonics=5
 def calculate_gain(X,Y):
     """Return gain in dB between y and x"""
     return 20*np.log10(np.abs(Y)/np.abs(X))
-NICE_FIGURES = Path('./figures/nice_figures')
-def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_frequencies,coeffs_per_stage):
-    NICE_FIGURES.mkdir(exist_ok=True)
+
+def create_nice_figures(poles,zeros,X_spectra,Y_spectra,datadir,workdir,pulses,data_frequencies,coeffs_per_stage):
+    
+    NICE_FIGURES  = workdir.joinpath('figures/nice_figures')
     
     #   For the corner frequency we define it as the frequency where 
     #   the gain has dropped by 3dB
@@ -453,16 +447,10 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
 
 
 
-    nc_path =  list(workdir.joinpath('processed/netcdf').glob('*.nc'))[0]
+    nc_path =  list(datadir.joinpath('processed/netcdf').glob('*.nc'))[0]
 
     b,a = to_coefficents(poles,zeros)
-    print(a.shape)
-    print(b.shape)
-    if a.shape[0] < b.shape[0]:
-        a= np.repeat(a,(b.shape[0]//a.shape[0]))
-    print(a.shape)
-    print(b.shape)
-    #b_norm,a_norm = scipy.signal.normalize(b,a)
+   
     a_norm = a
     b_norm=b
     
@@ -484,7 +472,7 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     #ax[1].semilogx()
     ax[1].set_xlabel(r'$\omega$ (rad/s)')
     ax[1].set_ylabel(r'Phase (rad)')
-    ax[1].set_xlim(0,300*2*np.pi)
+    ax[1].set_xlim(0,500*2*np.pi)
     ax[0].axvline(206.5*2*np.pi)
     plt.savefig(NICE_FIGURES.joinpath('frequency_response.png'),dpi=256)
     plt.close()
@@ -522,31 +510,24 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
 
 
     tf = 20*np.log10(H.real.__abs__())
-    ind_250 = np.argmin(abs(frequencies_rad-(300*2*np.pi)))
+    ind_250 = np.argmin(abs(frequencies_rad-(500*2*np.pi)))
     tf = tf[:ind_250]
     max_gain = np.argmax(tf)
     corner_freq_ind = np.argmin(abs(tf[max_gain:]-(tf[max_gain]-3)))+max_gain
     corner_freq = frequencies_rad[corner_freq_ind]
     print(f'Located Corner Frequency:   {corner_freq/(2*np.pi)} Hz')
     # #   Time domain impulse/step response
-    times = np.linspace(0,frequencies_hz.shape[0],frequencies_hz.shape[0])/500
+    times = np.arange(0,25000/500,1/500)
     assert b.shape[0]==a.shape[0]
-    #b,a  = scipy.signal.normalize(b,a)
-    # system = scipy.signal.TransferFunction(b,a)
-    # print(system.num.shape)
-    # print(system.den.shape)
-    # system.num = b
-    # system.den = a
-    # print(system.num.shape)
-    # print(system.den.shape)
-    t,impulse = scipy.signal.impulse((zeros,poles,0.05*10**8),T=times)
-    print(impulse)
+  
+    t,impulse = scipy.signal.impulse((zeros,poles,1),T=times)
+  
     fig,(ax,ax1) = plt.subplots(2,layout='constrained')
     ax.plot(t,impulse)
     ax.set_xlabel('samples')
     ax.set_ylabel('Impulse Response')
-    print(poles)
-    t,step = scipy.signal.step((zeros,poles,0.05*10**8),T=times)
+  
+    t,step = scipy.signal.step((zeros,poles,1),T=times)
 
     ax1.plot(t,step)
     ax1.set_xlabel('samples')
@@ -570,13 +551,13 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     #   Group delay
 
     fig,ax = plt.subplots(layout='constrained')
-    #w,group_delay = scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
-    group_delay = compute_group_delay(np.unwrap(phase),frequencies_hz)
+    w,group_delay = scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
+    #group_delay = compute_group_delay(np.unwrap(phase),frequencies_hz)
   
-    ax.plot(frequencies_hz[1:],group_delay)
+    ax.plot(frequencies_hz[:],group_delay)
     ax.set_xlabel('Frequency (Hz)')
     ax.set_ylabel('Group Delay (s)')
-    ax.set_xlim(0,250)
+    ax.set_xlim(0,500)
     #ax.set_ylim(-250,250)
     plt.savefig(NICE_FIGURES.joinpath('group_delay.png'),dpi=256)
     plt.close()
@@ -599,54 +580,6 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,workdir,pulses,data_freq
     plt.savefig(NICE_FIGURES.joinpath('THD_observed_diff.png'))
     plt.close()
 
-
-    #   SNR 
-    #   We need to look for the level of noise with no signal
-    #   migth be best to just read somthing at 30s past the minute in the nc files
-    #   Then fft and do 10log(P_sig/P_noise)
-  
-    dataset = nc.Dataset(nc_path,'r')
-  
-    var = dataset.variables['ch02']
-    sample_rate = var.__dict__['sample_rate_hz']
-    start_time =  var.__dict__['data_start']
-    end_time =  var.__dict__['data_end']
-
-    noise_start =datetime.fromtimestamp(start_time + ((end_time-start_time)*3/4))
-    noise_start = datetime(noise_start.year,
-                           noise_start.month,
-                           noise_start.day,
-                           noise_start.hour,
-                           noise_start.minute
-                           ).timestamp()+30
-    noise_end = noise_start+20
-
-    start_ind = int((noise_start-start_time)*sample_rate)
-    end_ind = int((noise_end-start_time)*sample_rate)
-    noise = var[start_ind:end_ind]
-    noise_prime = np.fft.rfft(noise,n = 6000)
-    noise_freqs = np.fft.rfftfreq(n=6000,d=1/sample_rate)
-
-    target_high = 1500  
-    df_y = noise_freqs[1]-noise_freqs[0]
-    max_f = noise_freqs.max()
-    pad_number = int((target_high - max_f)/df_y)
-    noise_freqs = np.concatenate([noise_freqs,np.linspace(max_f,target_high,pad_number)])
-    noise_prime = np.concatenate([noise_prime,np.zeros(pad_number)]) 
-    noise_prime = data_transform(noise_prime)
-    
-
-
-    snr = 10*(Y_spectra[0]-noise_prime)
-    fig,ax = plt.subplots(layout='constrained')
-    ax.plot(noise_freqs,snr)
-
-    ax.set_ylabel('SNR (dB)')
-    ax.set_xlabel('Frequency (Hz)')
-    plt.savefig(f'{NICE_FIGURES}/SNR.png',dpi=256)
-    plt.close()
-
-    #   FOr SFDR we need to look for the highest other peak, relative to the fundamental. Should be +ve
   
     return
 def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH):
