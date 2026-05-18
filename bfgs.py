@@ -73,7 +73,9 @@ def load_datasets(paths:list[Path],workdir,nfrequency,channel,sinc_dec=None):
     pulses = np.zeros(shape=(1,4))
     for datadir in paths:
         nc_path = list(datadir.joinpath('processed/netcdf').glob('*.nc'))[0]
-        pulses_path = datadir.joinpath('processed/pulses.txt')
+        pulses_path = datadir.joinpath(f'pulses_{channel}.txt')
+        if not pulses_path.is_file():
+            raise FileNotFoundError(f'pulses_{channel}.txt is not in the top level of the data directory')
         X_spectra_i,Y_spectra_i,frequencies  = load_xy(pulses_path,nc_path,workdir,nfrequency,channel)
         pulses_i = load_pulses(pulses_path)
         X_spectra+=X_spectra_i
