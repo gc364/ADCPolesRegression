@@ -8,6 +8,7 @@ if __name__ == '__main__':
     parser = ArgumentParser(description='Run the regression algorithm for the ADC transfer function')
     parser.add_argument('working_directory',type=Path,help='Working directory for outputs')
     parser.add_argument('data_directories',type=str,help='Comma seperated list of the data directories')
+    parser.add_argument('channel',type=str,help='The channel to analyse (e.g. ch00)')
     parser.add_argument('stages',type=str,help='Comma seperated list of the type of filter (LINEAR or MIN) for each stage')
     parser.add_argument('num_coeffs',type=str,help='Comma seperated list of the number of coefficients for each stage')
     parser.add_argument('--sinc_decimation',type=str,help='Comma seperated list of sinc decimations',required=False,default=None)
@@ -34,6 +35,6 @@ if __name__ == '__main__':
     #   If True, will create a new optimisation, else just reruns plotting
     new_optimise = not args.plots_only
 
-    main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,args.nepochs,new_optimise,args.ftol,sinc_dec,args.nfrequency)
+    main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,args.nepochs,new_optimise,args.ftol,sinc_dec,args.nfrequency,args.channel)
 
     exit()

@@ -14,6 +14,8 @@ As the forward model uses `scipy.signal.freqz`, the poles are zeros are transfor
 filter type is linear then the reciprocals of the current model vector are calculated and concatenated. Finally, the conjugates are calculated and appended in
 `g_scipy` in `shared.py`.
 
+As a note the frequency resolution of the data is important, particularly for the low end and this can be changed by altering `nfrequency`. It does slow down significantly as you 
+
 
 ##  Filter Characteristics
 It is assumed throughout that all poles and zeros are symmetric over the real axis where applicable

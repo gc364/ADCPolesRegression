@@ -56,7 +56,7 @@ def callback_lbfgs(intermediate_result):
     return
 
 
-def load_datasets(paths:list[Path],workdir,nfrequency,sinc_dec=None):
+def load_datasets(paths:list[Path],workdir,nfrequency,channel,sinc_dec=None):
     """
     load and concatenate multiple datasets.
     
@@ -74,7 +74,7 @@ def load_datasets(paths:list[Path],workdir,nfrequency,sinc_dec=None):
     for datadir in paths:
         nc_path = list(datadir.joinpath('processed/netcdf').glob('*.nc'))[0]
         pulses_path = datadir.joinpath('processed/pulses.txt')
-        X_spectra_i,Y_spectra_i,frequencies  = load_xy(pulses_path,nc_path,workdir,nfrequency)
+        X_spectra_i,Y_spectra_i,frequencies  = load_xy(pulses_path,nc_path,workdir,nfrequency,channel)
         pulses_i = load_pulses(pulses_path)
         X_spectra+=X_spectra_i
         Y_spectra+=Y_spectra_i
@@ -283,11 +283,11 @@ def sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage):
     return pandz
 
 
-def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optimise,ftol,sinc_dec,nfrequency):
+def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optimise,ftol,sinc_dec,nfrequency,channel):
     
     figpath = workdir.joinpath('figures/bfgs')
     f_type='FIR'    #   Hardcoded as it can't handle IIR at all
-    X_spectra,Y_spectra,frequencies,pulses = load_datasets(paths,workdir,nfrequency,sinc_dec)
+    X_spectra,Y_spectra,frequencies,pulses = load_datasets(paths,workdir,nfrequency,channel,sinc_dec)
     print('Datasets Loaded')
 
     if new_optimise:
