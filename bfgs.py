@@ -1,7 +1,7 @@
 import numpy as np
 from pathlib import Path
 from filter_coeffs import *
-from scipy.optimize import minimize
+from scipy.optimize import minimize,fmin_l_bfgs_b
 from shared import *
 from types import SimpleNamespace
 
@@ -56,7 +56,7 @@ def callback_lbfgs(intermediate_result):
     return
 
 
-def load_datasets(paths:list[Path],workdir,sinc_dec=None):
+def load_datasets(paths:list[Path],workdir,nfrequency,sinc_dec=None):
     """
     load and concatenate multiple datasets.
     
@@ -74,7 +74,7 @@ def load_datasets(paths:list[Path],workdir,sinc_dec=None):
     for datadir in paths:
         nc_path = list(datadir.joinpath('processed/netcdf').glob('*.nc'))[0]
         pulses_path = datadir.joinpath('processed/pulses.txt')
-        X_spectra_i,Y_spectra_i,frequencies  = load_xy(pulses_path,nc_path,workdir)
+        X_spectra_i,Y_spectra_i,frequencies  = load_xy(pulses_path,nc_path,workdir,nfrequency)
         pulses_i = load_pulses(pulses_path)
         X_spectra+=X_spectra_i
         Y_spectra+=Y_spectra_i
@@ -283,11 +283,11 @@ def sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage):
     return pandz
 
 
-def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optimise,ftol,sinc_dec):
+def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optimise,ftol,sinc_dec,nfrequency):
     
     figpath = workdir.joinpath('figures/bfgs')
     f_type='FIR'    #   Hardcoded as it can't handle IIR at all
-    X_spectra,Y_spectra,frequencies,pulses = load_datasets(paths,workdir,sinc_dec)
+    X_spectra,Y_spectra,frequencies,pulses = load_datasets(paths,workdir,nfrequency,sinc_dec)
     print('Datasets Loaded')
 
     if new_optimise:
@@ -303,11 +303,13 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optim
                 method='L-BFGS-B', 
                 options={
                          'maxiter':nepochs,
+                         'maxfun':1e6,  #   This is really big as it takes at least nz evaluations to compute 1 Jacobian
                          'ftol':ftol
                          },
                 bounds=bounds,
                 callback=callback_lbfgs,
                 )
+    
         print('Done!')
         print(res)
         m_post = res.x

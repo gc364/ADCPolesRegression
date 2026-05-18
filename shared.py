@@ -238,7 +238,7 @@ def data_transform(spectra):
     return ret
 
 
-def load_xy(pulses_path,data_path,workdir):
+def load_xy(pulses_path,data_path,workdir,nfrequency):
 
     pulses = load_pulses(pulses_path)
     dataset = nc.Dataset(data_path)
@@ -253,14 +253,14 @@ def load_xy(pulses_path,data_path,workdir):
     length_seconds = x_cycles/X_known_freqs
     #   List of cut observed time series
     y_time  = cut_timeseries(y,chattr,x_start_times,length_seconds)
-    maxs = [y.shape[0] for y in y_time]
-    n = 6000#max(maxs)#6000    #   The length of the spectra
+    #maxs = [y.shape[0] for y in y_time]
+    n = nfrequency   #   The length of the spectra
   
     #   Calculate Y spectra
     Y_spectra = [np.fft.rfft(y,n=n) for y in y_time]
     Y_frequencies = np.fft.rfftfreq(n=n,d=1/chattr['sample_rate_hz'])
 
-    target_high = 500  #The highest frequency we're interested in
+    target_high = chattr['sample_rate_hz']#500  #The highest frequency we're interested in
     df_y = Y_frequencies[1]-Y_frequencies[0]
     max_f = Y_frequencies.max()
     #We need to pad the frequencies to get to 1500 Hz
@@ -268,7 +268,7 @@ def load_xy(pulses_path,data_path,workdir):
     Y_frequencies = np.concatenate([Y_frequencies,np.linspace(max_f,target_high,pad_number)])
     Y_spectra = [np.concatenate([y,np.zeros(pad_number)]) for y in Y_spectra]
     n = Y_frequencies.shape[0]
-    print(f'NUMFREQS = {n}')
+    print(f'Data Frequency Resolution = {target_high/n :.6f}Hz')
     #   Calculate X spectra       
 
     x_timeseries = []
