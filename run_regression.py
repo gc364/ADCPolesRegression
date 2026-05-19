@@ -7,7 +7,7 @@ if __name__ == '__main__':
 
     parser = ArgumentParser(description='Run the regression algorithm for the ADC transfer function')
     parser.add_argument('working_directory',type=Path,help='Working directory for outputs')
-    parser.add_argument('data_directories',type=str,help='Comma seperated list of the data directories')
+    parser.add_argument('data_directories',type=str,help='Comma seperated list of the data directories (T-Rex working directories)')
     parser.add_argument('channel',type=str,help='The channel to analyse (e.g. ch00)')
     parser.add_argument('stages',type=str,help='Comma seperated list of the type of filter (LINEAR or MIN) for each stage')
     parser.add_argument('num_coeffs',type=str,help='Comma seperated list of the number of coefficients for each stage')
@@ -20,7 +20,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
      
     workdir = args.working_directory
-    workdir.joinpath('figures/bfgs').mkdir(exist_ok=True)
+    workdir.joinpath('figures/bfgs').mkdir(exist_ok=True,parents=True)
     workdir.joinpath('figures/nice_figures').mkdir(exist_ok=True)
     workdir.joinpath('results').mkdir(exist_ok=True)
 

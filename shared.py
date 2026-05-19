@@ -397,6 +397,17 @@ def calculate_gain(X,Y):
     """Return gain in dB between y and x"""
     return 20*np.log10(np.abs(Y)/np.abs(X))
 
+def compute_impulse_response(H,freqs):
+    imp = np.ones_like(freqs)
+    Hp = imp*H
+    ret = np.fft.irfft(Hp)
+    return ret
+def compute_step_response(H,freqs):
+    step = 1/freqs
+    Hp = step*H
+    ret = np.fft.irfft(Hp)
+    return ret
+
 def create_nice_figures(poles,zeros,X_spectra,Y_spectra,datadir,workdir,pulses,data_frequencies,coeffs_per_stage):
     
     NICE_FIGURES  = workdir.joinpath('figures/nice_figures')
@@ -477,18 +488,21 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,datadir,workdir,pulses,d
     times = np.arange(0,25000/500,1/500)
     assert b.shape[0]==a.shape[0]
   
-    t,impulse = scipy.signal.impulse((zeros,poles,1),T=times)
-  
-    fig,(ax,ax1) = plt.subplots(2,layout='constrained')
-    ax.plot(t,impulse)
-    ax.set_xlabel('samples')
-    ax.set_ylabel('Impulse Response')
-  
-    t,step = scipy.signal.step((zeros,poles,1),T=times)
 
-    ax1.plot(t,step)
-    ax1.set_xlabel('samples')
+    
+    impulse = compute_impulse_response(H,frequencies_rad)
+    fig,(ax,ax1) = plt.subplots(2,layout='constrained')
+  
+    ax.plot(np.linspace(0,impulse.shape[0]/500,impulse.shape[0]),impulse)
+    ax.set_xlabel('Seconds')
+  
+    ax.set_ylabel('Impulse Response')
+
+    step = compute_step_response(H,frequencies_rad)
+    ax1.plot(np.linspace(0,step.shape[0]/500,step.shape[0]),step)
+    ax1.set_xlabel('Seconds')
     ax1.set_ylabel('Step Response')
+   
     plt.savefig(NICE_FIGURES.joinpath('impulse_step_response.png'),dpi=256)
     plt.close()
 
@@ -506,31 +520,18 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,datadir,workdir,pulses,d
     #   Group delay
 
     fig,ax = plt.subplots(layout='constrained')
-    w,group_delay = scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
+    group_delay = compute_group_delay(np.unwrap(phase),frequencies_rad)#scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
 
   
-    ax.plot(frequencies_hz[:],group_delay)
+    ax.plot(frequencies_hz[1:],group_delay)
     ax.set_xlabel('Frequency (Hz)')
     ax.set_ylabel('Group Delay (s)')
     ax.set_xlim(0,500)
     plt.savefig(NICE_FIGURES.joinpath('group_delay.png'),dpi=256)
     plt.close()
 
-    #   Total Harmonic Distortion
-    input_freqs = pulses[:,1]
-    thd,w = compute_thd(X_spectra,Y_spectra,input_freqs,data_frequencies)
-
-    mask = w==31.25
-
-    fig,ax = plt.subplots()
-    ax.plot(w,thd,'r*-')
-    ax.set_title(f'THD at 31.25Hz = {np.mean(thd[mask]):02f} +- {np.std(thd[mask]):04f} dB')
-    ax.set_ylabel('THD (dB)')
-    ax.set_xlabel('Input Freq (Hz)')
-    plt.savefig(NICE_FIGURES.joinpath('THD_observed_diff.png'))
-    plt.close()
-
     return
+
 def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH):
 
     poles_final,zeros_final = pandz[:,0],pandz[:,1]
@@ -591,10 +592,12 @@ def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGP
     plt.close()
 
     fig,ax = plt.subplots(3,layout='constrained')
+    Y_size = len(Y_spectra)
+
     for y,d,axs,f in zip(
-                        [Y_spectra[0],Y_spectra[50],Y_spectra[100]],
-                        [data_reconst[0],data_reconst[50],data_reconst[100]],
-                        ax,[pulses[0,1],pulses[50,1],pulses[100,1]]
+                        [Y_spectra[0],Y_spectra[Y_size//2],Y_spectra[Y_size-1]],
+                        [data_reconst[0],data_reconst[Y_size//2],data_reconst[Y_size-1]],
+                        ax,[pulses[0,1],pulses[Y_size//2,1],pulses[Y_size-1,1]]
                        ):
         axs.plot(frequencies,10**y,'k-',label='Observations')
         axs.plot(frequencies,10**d,'r--',label='Synthetics')
@@ -603,6 +606,7 @@ def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGP
         
         axs.set_ylabel(r'Log(Amp)')
     ax[-1].set_xlabel('Iteration')
+    ax[-1].legend()
     fig.savefig(f'{FIGPATH}/data_fit.png')
     plt.close()
 
