@@ -328,7 +328,7 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optim
         zeros_final = pandz[:,1]
      
     out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,figpath)
-    create_nice_figures(poles_final,zeros_final,X_spectra,Y_spectra,paths[0],workdir,pulses,frequencies,coeffs_per_stage)
+    create_nice_figures(poles_final,zeros_final,workdir,frequencies)
     create_fir_filter_PZs(workdir)
     return
 

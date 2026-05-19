@@ -408,24 +408,15 @@ def compute_step_response(H,freqs):
     ret = np.fft.irfft(Hp)
     return ret
 
-def create_nice_figures(poles,zeros,X_spectra,Y_spectra,datadir,workdir,pulses,data_frequencies,coeffs_per_stage):
+def create_nice_figures(poles,zeros,workdir,data_frequencies):
     
     NICE_FIGURES  = workdir.joinpath('figures/nice_figures')
     
     #   For the corner frequency we define it as the frequency where 
     #   the gain has dropped by 3dB
 
-
-
-
-    nc_path =  list(datadir.joinpath('processed/netcdf').glob('*.nc'))[0]
-
     b,a = to_coefficents(poles,zeros)
-   
-    a_norm = a
-    b_norm=b
-    
-        
+
     frequencies_hz = data_frequencies.copy()
     frequencies_rad = frequencies_hz*2*np.pi
 
@@ -465,7 +456,7 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,datadir,workdir,pulses,d
 
     #   Transfer function (Hz)
     fig,ax  = plt.subplots(2,layout='constrained')
-    ax[0].plot(frequencies_hz,20*np.log10(H))
+    ax[0].plot(frequencies_hz,20*np.log10(H.real.__abs__()))
     ax[0].semilogx()
     ax[0].set_xlabel(r'$f$ (Hz)')
     ax[0].set_ylabel(r'Response (dB)')
@@ -508,9 +499,9 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,datadir,workdir,pulses,d
 
     #   Coefficient spectra
     fig,ax = plt.subplots(2,layout='constrained')
-    ax[0].plot(np.abs(b_norm))
+    ax[0].plot(np.abs(a))
     ax[0].semilogy()
-    ax[1].plot(np.abs(a_norm))
+    ax[1].plot(np.abs(b))
     ax[1].semilogy()
     ax[0].set_ylabel('Numerator Coefficents')
     ax[1].set_ylabel('Denomimator Coefficents')     
@@ -520,7 +511,7 @@ def create_nice_figures(poles,zeros,X_spectra,Y_spectra,datadir,workdir,pulses,d
     #   Group delay
 
     fig,ax = plt.subplots(layout='constrained')
-    group_delay = compute_group_delay(np.unwrap(phase),frequencies_rad)#scipy.signal.group_delay((b_norm,a_norm),w=frequencies_rad,fs=2*np.pi*500)
+    group_delay = compute_group_delay(np.unwrap(phase),frequencies_rad)
 
   
     ax.plot(frequencies_hz[1:],group_delay)
