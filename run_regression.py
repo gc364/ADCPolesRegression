@@ -20,6 +20,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
      
     workdir = args.working_directory
+    workdir = workdir.joinpath(f'{args.channel}')
+    workdir.mkdir(exist_ok=True)
     workdir.joinpath('figures/bfgs').mkdir(exist_ok=True,parents=True)
     workdir.joinpath('figures/nice_figures').mkdir(exist_ok=True)
     workdir.joinpath('results').mkdir(exist_ok=True)

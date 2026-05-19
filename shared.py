@@ -6,6 +6,7 @@ from numpy.polynomial import Polynomial
 from filter_coeffs import *
 import numpy.polynomial.polynomial as poly
 from scipy.signal import freqz_zpk
+from copy import deepcopy
 
 def sinc_filter_coeffs(N: int) -> np.ndarray:
     """
@@ -114,8 +115,7 @@ def create_fir_filter_PZs(workdir):
     plt.savefig(workdir.joinpath('figures/TI_response.png'))
 
     fig,ax = plt.subplots(5,layout='constrained',figsize=(8.2,11.7))
-    print(f'Number of Zeros: {zeros.shape}')
-    print(f'Number of Poles: {poles.shape}')
+  
     ax[0].plot(zeros.real,zeros.imag,'o')
     ax[0].plot(poles.real,poles.imag,'x',markersize=4)
     ax[0].grid()
@@ -326,18 +326,18 @@ def apply_stages(poles,zeros,X_spectra,Y_spectra,frequencies,coeffs_per_stage,da
         stages.append((poles[running:running+nc],zeros[running:running+nc]))
        
         running+=nc
-    X_i = X_spectra
+    X_i = deepcopy(X_spectra)
     for i,stage in enumerate(stages):
-      
+        
         if i<len(stages)-1:
-            X_i = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,True)
+            X_i = g_scipy(stage[0],stage[1],deepcopy(X_i),Y_spectra,frequencies,True)
             if transfer_function:
-                X_i = [X_i[i]-np.log10(X_spectra[i].__abs__()+1e-5) for i in range(len(X_spectra))]
+                X_i = [X_i[i]-np.log10(X_spectra[i].__abs__()+1e-5) for i in range(len(X_i))]
         elif i == len(stages)-1:
-            l = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,False)
-            X_fin = g_scipy(stage[0],stage[1],X_i,Y_spectra,frequencies,True)
+            l = g_scipy(stage[0],stage[1],deepcopy(X_i),Y_spectra,frequencies,False)
+            X_fin = g_scipy(stage[0],stage[1],deepcopy(X_i),Y_spectra,frequencies,True)
             if transfer_function:
-                X_fin = [X_fin[i]-np.log10(X_spectra[i].__abs__()+1e-5) for i in range(len(X_spectra))]
+                X_fin = [X_fin[i]-np.log10(X_spectra[i].__abs__()+1e-5) for i in range(len(X_fin))]
     if data_only:
         return X_fin
     return l
@@ -404,6 +404,7 @@ def compute_impulse_response(H,freqs):
     return ret
 def compute_step_response(H,freqs):
     step = 1/freqs
+    step[0] = 1
     Hp = step*H
     ret = np.fft.irfft(Hp)
     return ret
@@ -524,10 +525,10 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies):
     return
 
 def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH):
-
+    
     poles_final,zeros_final = pandz[:,0],pandz[:,1]
     if coeffs_per_stage is not None:
-        data_reconst = apply_stages(poles_final,zeros_final,X_spectra,Y_spectra,frequencies,coeffs_per_stage,True)
+        data_reconst = apply_stages(poles_final[:pandz.shape[0]//2],zeros_final[:pandz.shape[0]//2],X_spectra,Y_spectra,frequencies,coeffs_per_stage,True)
 
     gain = calculate_gain(abs(X_spectra[0]),10**data_reconst[0])
 

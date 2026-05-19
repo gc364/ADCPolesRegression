@@ -4,7 +4,9 @@ The idea of this package is to be able to regress for filter coefficents where t
 bounds. Below describes the characteristics of different common filters and how to enforce them in the optimisation
 
 ##  How to Use
-To run the regression simply run `./run_regression.py` with the required arguments. Run `./run_regression.py --help` to see the arguments.
+To run the regression simply run `./run_regression.py` with the required arguments. Run `./run_regression.py --help` to see the arguments. The idea is that
+you create 1 working directory per logger, where directories are automatically made based off the channel names, and each channel directory is then filled
+with the results.
 
 ##  General Structure and Things to Note
 The most important thing here is the bounds that are imposed to ensure we get the correct filter type. If any of the ones I've put in are wrong, the 
