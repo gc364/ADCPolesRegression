@@ -322,7 +322,7 @@ def write_metadata(workdir,phases_per_stage,coeffs_per_stage,res:OptimizeResult,
     return
 
 def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optimise,ftol,sinc_dec,nfrequency,channel):
-    
+    num_workers = 1
     figpath = workdir.joinpath('figures/bfgs')
     f_type='FIR'    #   Hardcoded as it can't handle IIR at all
     X_spectra,Y_spectra,frequencies,pulses = load_datasets(paths,workdir,nfrequency,channel,sinc_dec)
@@ -337,16 +337,19 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optim
         nz =  sum(coeffs_per_stage)*2
 
         res = minimize(
-                lambda m:objective_lbfgs(m,nz,X_spectra,Y_spectra,frequencies,phases_per_stage,scipy=True,coeffs_per_stage=coeffs_per_stage,set_poles = set_poles),
+                objective_lbfgs,
+                args = (nz,X_spectra,Y_spectra,frequencies,phases_per_stage,True,coeffs_per_stage,set_poles),
                 x0=m0,
                 method='L-BFGS-B', 
                 options={
                          'maxiter':nepochs,
                          'maxfun':1e6,  #   This is really big as it takes at least nz evaluations to compute 1 Jacobian
-                         'ftol':ftol
+                         'ftol':ftol,
+                         'workers':num_workers
                          },
                 bounds=bounds,
                 callback=callback_lbfgs,
+                
                 )
     
         print('Done!')
