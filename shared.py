@@ -327,6 +327,7 @@ def apply_stages(poles,zeros,X_spectra,Y_spectra,frequencies,coeffs_per_stage,da
        
         running+=nc
     X_i = deepcopy(X_spectra)
+
     for i,stage in enumerate(stages):
         
         if i<len(stages)-1:
@@ -409,7 +410,7 @@ def compute_step_response(H,freqs):
     ret = np.fft.irfft(Hp)
     return ret
 
-def create_nice_figures(poles,zeros,workdir,data_frequencies):
+def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,phases_per_stage):
     
     NICE_FIGURES  = workdir.joinpath('figures/nice_figures')
     
@@ -420,8 +421,18 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies):
 
     frequencies_hz = data_frequencies.copy()
     frequencies_rad = frequencies_hz*2*np.pi
+    running = 0 
+    H = np.ones_like(frequencies_rad,dtype=np.complex128)
+    for num_coeffs,filter_type in zip(coeffs_per_stage,phases_per_stage):
+        if filter_type  == 'MIN':
+            _,h= scipy_frequency_response(poles[running:running+2*num_coeffs],zeros[running:running+2*num_coeffs],frequencies_rad)
+            H*=h
+            running+=2*num_coeffs
+        elif filter_type == 'LINEAR':
+            _,h= scipy_frequency_response(poles[running:running+2*num_coeffs],zeros[running:running+2*num_coeffs],frequencies_rad)
+            H*=h
+            running+=4*num_coeffs
 
-    _,H = scipy_frequency_response(poles,zeros,frequencies_rad)
     phase = np.angle(H)
 
     #   Transfer function (rad)
@@ -524,11 +535,31 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies):
 
     return
 
-def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH):
-    
-    poles_final,zeros_final = pandz[:,0],pandz[:,1]
+def out_plots(pandz,coeffs_per_stage,phases_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH):
+    #   We need to reorder these before handing them to apply stages
+    poles_final,zeros_final = pandz[:,0],pandz[:,1] #   These are in order of stages, with the conjugates
+    poles_list = []
+    zeros_list = []
+    ind_run = 0
+    coeffs_per_stage_c = deepcopy(coeffs_per_stage)
+    i=0
+    for num_coeffs,filter_type in zip(coeffs_per_stage,phases_per_stage):
+        if filter_type == 'MIN':
+            poles_list.append(poles_final[ind_run:ind_run+num_coeffs])
+            zeros_list.append(zeros_final[ind_run:ind_run+num_coeffs])
+            ind_run+=2*num_coeffs
+        elif filter_type == 'LINEAR':
+            poles_list.append(poles_final[ind_run:ind_run+2*num_coeffs])
+            zeros_list.append(zeros_final[ind_run:ind_run+2*num_coeffs])
+            ind_run+=4*num_coeffs
+            coeffs_per_stage_c[i]*=2
+        i+=1
+
+    poles_final_as = np.concatenate(poles_list)
+    zeros_final_as = np.concatenate(zeros_list)
+
     if coeffs_per_stage is not None:
-        data_reconst = apply_stages(poles_final[:pandz.shape[0]//2],zeros_final[:pandz.shape[0]//2],X_spectra,Y_spectra,frequencies,coeffs_per_stage,True)
+        data_reconst = apply_stages(poles_final_as,zeros_final_as,X_spectra,Y_spectra,frequencies,coeffs_per_stage_c,True)
 
     gain = calculate_gain(abs(X_spectra[0]),10**data_reconst[0])
 
@@ -543,16 +574,6 @@ def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGP
     ax.set_xlabel('Frequency (Hz)')
     plt.savefig(f'{FIGPATH}/gain.png',dpi=256)
 
-    fig,ax = plt.subplots(2,layout='constrained')
-    H = calculate_transfer_function(poles_final,zeros_final,2*np.pi*frequencies)
-    ax[0].plot(frequencies,20*np.log10(H.real.__abs__()))#/(2*np.pi) + 1e-5)
-    ax[0].semilogx()
-    ax[1].set_xlabel('Frequency (Hz)')
-    ax[0].set_ylabel(r'$\mathfrak{R}$')
-    ax[1].set_ylabel(r'$\mathfrak{I}$')
-    ax[1].plot(frequencies,H.imag.__abs__())
-    plt.savefig(f'{FIGPATH}/Transfer_function.png')
-    plt.close()
 
     fig,ax = plt.subplots(layout='constrained')
     ax.plot(poles_final.real,poles_final.imag,'x',label='Poles')
@@ -594,7 +615,7 @@ def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGP
         axs.plot(frequencies,10**y,'k-',label='Observations')
         axs.plot(frequencies,10**d,'r--',label='Synthetics')
         axs.loglog()
-        axs.set_title(rf'$f_x$ = {f}')
+        axs.set_title(rf'$f_x$ = {round(f,2)}')
         
         axs.set_ylabel(r'Log(Amp)')
     ax[-1].set_xlabel('Iteration')
@@ -602,25 +623,5 @@ def out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGP
     fig.savefig(f'{FIGPATH}/data_fit.png')
     plt.close()
 
-    w,h = scipy_frequency_response(poles_final,zeros_final,2*np.pi*frequencies)
-    fig,(ax,ax1) = plt.subplots(2)
-    ax.set_title(r'$||H(\omega)||$')
-    ax.plot(w,h.__abs__())
-    ax1.set_title(r'$\mathfrak{Im}(H(\omega))$')
-    ax1.plot(w,h.imag.__abs__())
-    ax1.set_xlabel(r'$\omega$ (rad/s)')
-    ax.loglog()
-    ax1.loglog()
-    plt.savefig(f'{FIGPATH}/scipyFreqz.png')
-    plt.close()
 
-    fig,ax = plt.subplots()
-    phase = np.angle(h)
-    ax.plot(w,phase)
-    ax.set_xlabel(r'$\omega$ (radians)')
-    ax.set_ylabel(r'$\Phi$ (radians)')
-    ax.semilogx()
-    plt.savefig(f'{FIGPATH}/phase_repsonse.png')
-    plt.close()
-    
     return

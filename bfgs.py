@@ -12,12 +12,13 @@ def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
     zeros_list = []
     poles_list = []
   
-    
+    coeffs_per_stage_c = deepcopy(coeffs_per_stage)
     for i,(phase,nc) in enumerate(zip(phases_per_stage,coeffs_per_stage)):
         zeros = m[i*nc:(i+1)*nc]*np.exp(1j* m[(nzeros//2)+(i*nc):(nzeros//2)+((i+1)*nc)]) 
 
         if phase == 'LINEAR':
             zeros = np.concatenate([zeros,1/zeros])
+            coeffs_per_stage_c[i] *=2
 
         if set_poles is None:
             poles = m[nzeros:(3*nzeros)//2]*np.exp(1j*m[(3*nzeros)//2:])
@@ -39,7 +40,7 @@ def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
   
 
     if coeffs_per_stage is not None:
-        l = -apply_stages(poles,zeros,X_spectra,Y_spectra,frequencies,coeffs_per_stage)
+        l = -apply_stages(poles,zeros,X_spectra,Y_spectra,frequencies,coeffs_per_stage_c)
     elif scipy == False:
         l  = -g(poles,zeros,X_spectra,Y_spectra,frequencies)
     else:
@@ -95,6 +96,7 @@ def initialise_model(coeffs_per_stage:list[int],bounds_list:list[dict],set_poles
     poles_list= []
     zeros_list_r = []
     zeros_list_phi = []
+    i=0
     for bounds,nz in zip(bounds_list,coeffs_per_stage):
         if not unit_circle:
             if bounds.phase == 'MIN' or bounds.phase is None:
@@ -110,12 +112,12 @@ def initialise_model(coeffs_per_stage:list[int],bounds_list:list[dict],set_poles
         else:
             if (bounds.phase == 'MIN') or (bounds.phase is None):
                 phi = np.linspace(0,np.pi,nz)
-                r = np.ones(nz)-0.3
+                r = np.ones(nz)-(0.1*(i+1))
                 zeros_list_r.append(r)
                 zeros_list_phi.append(phi)
             elif bounds.phase=='LINEAR':
                 phi = np.linspace(0,np.pi,nz)
-                r = np.ones(nz)#-0.3
+                r = np.ones(nz)-(0.1*i)
                 zeros_list_r.append(r)
                 zeros_list_phi.append(phi)
         
@@ -124,6 +126,7 @@ def initialise_model(coeffs_per_stage:list[int],bounds_list:list[dict],set_poles
                                     np.random.uniform(bounds.poles_r_min,bounds.poles_r_max,nz),
                                     np.random.uniform(bounds.poles_phi_min,bounds.poles_phi_max,nz)
                                     ]))
+        i+=1
     if set_poles is None:
         zeros = np.concatenate(zeros_list_r+zeros_list_phi)
         poles = np.concatenate(poles_list)    
@@ -327,8 +330,8 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optim
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
      
-    out_plots(pandz,coeffs_per_stage,frequencies,X_spectra,Y_spectra,pulses,figpath)
-    create_nice_figures(poles_final,zeros_final,workdir,frequencies)
+    out_plots(pandz,coeffs_per_stage,phases_per_stage,frequencies,X_spectra,Y_spectra,pulses,figpath)
+    create_nice_figures(poles_final,zeros_final,workdir,frequencies,coeffs_per_stage,phases_per_stage)
     create_fir_filter_PZs(workdir)
     return
 
