@@ -1,9 +1,10 @@
 import numpy as np
 from pathlib import Path
 from filter_coeffs import *
-from scipy.optimize import minimize,fmin_l_bfgs_b
+from scipy.optimize import minimize,fmin_l_bfgs_b,OptimizeResult
 from shared import *
 from types import SimpleNamespace
+import json
 
 
 def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
@@ -287,6 +288,36 @@ def sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage):
     pandz = np.vstack(pandz_list)
     return pandz
 
+def write_metadata(workdir,phases_per_stage,coeffs_per_stage,res:OptimizeResult,ftol,nfrequency,sinc_dec,data_dirs,channel):
+    number_of_stages = len(phases_per_stage)
+    file = workdir.joinpath('metadata.json')
+    file.touch(exist_ok=True)
+    nc_files  = [list(dd.joinpath('processed/netcdf').glob('*.nc'))[0] for dd in data_dirs]
+
+    metadata = {}
+    metadata.update({'data_files':[str(dd) for dd in nc_files]})
+    metadata.update({'channel':channel})
+    metadata.update({'number_of_stages':number_of_stages})
+    metadata.update({'nfrequency':nfrequency})
+    metadata.update({'sinc_filters':sinc_dec if sinc_dec is not None else 'None'})
+
+    metadata.update({'regression_success':res.success})
+    metadata.update({'regression_message':res.message})
+    metadata.update({'regression_ftol':ftol})
+    metadata.update({'regression_final_loss':res.fun})
+    metadata.update({'regression_number_iterations':res.nit})
+    for stage in range(number_of_stages):
+        stage_meta = {}
+        stage_meta.update({
+            'filter_type':phases_per_stage[stage],
+            'number_of_zeros':2*coeffs_per_stage[stage] if phases_per_stage[stage]=='MIN' else 4*coeffs_per_stage[stage]
+        })
+        metadata.update({f'stage_{stage}':stage_meta})
+
+    with open(file,'w+') as fd:
+        json.dump(metadata,fd,indent=1)
+    
+    return
 
 def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optimise,ftol,sinc_dec,nfrequency,channel):
     
@@ -324,6 +355,7 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optim
         print('Plotting')
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
+        write_metadata(workdir,phases_per_stage,coeffs_per_stage,res,ftol,nfrequency,sinc_dec,paths,channel)
 
     else:
         pandz =  np.load(workdir.joinpath('results/PolesandZeros.npy'))
