@@ -5,7 +5,7 @@ from scipy.optimize import minimize,fmin_l_bfgs_b,OptimizeResult
 from shared import *
 from types import SimpleNamespace
 import json
-
+import datetime
 
 def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
                     scipy=False,coeffs_per_stage=None,set_poles=None):
@@ -288,7 +288,7 @@ def sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage):
     pandz = np.vstack(pandz_list)
     return pandz
 
-def write_metadata(workdir,phases_per_stage,coeffs_per_stage,res:OptimizeResult,ftol,nfrequency,sinc_dec,data_dirs,channel):
+def write_metadata(workdir,phases_per_stage,coeffs_per_stage,res:OptimizeResult,ftol,nfrequency,sinc_dec,data_dirs,channel,total_time):
     number_of_stages = len(phases_per_stage)
     file = workdir.joinpath('metadata.json')
     file.touch(exist_ok=True)
@@ -303,6 +303,8 @@ def write_metadata(workdir,phases_per_stage,coeffs_per_stage,res:OptimizeResult,
 
     metadata.update({'regression_success':res.success})
     metadata.update({'regression_message':res.message})
+    metadata.update({'regression_time_seconds':total_time})
+
     metadata.update({'regression_ftol':ftol})
     metadata.update({'regression_final_loss':res.fun})
     metadata.update({'regression_number_iterations':res.nit})
@@ -330,7 +332,8 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optim
         m0,bounds,set_poles,nz = get_system(f_type,phases_per_stage,coeffs_per_stage)
         print('Got Settings')
         print('Optimsing...')
-  
+        start_time = datetime.datetime.now()
+        print(f'Start Time: {start_time}')
         nz =  sum(coeffs_per_stage)*2
 
         res = minimize(
@@ -347,15 +350,28 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optim
                 )
     
         print('Done!')
+        end_time = datetime.datetime.now()
+        print(f'End Time: {end_time}')
+        total_time = end_time.timestamp()-start_time.timestamp()
+        time_hrs = np.floor(total_time/3600)
+        if time_hrs >0:
+            time_mins = (total_time%(time_hrs*3600))/60
+        else:
+            time_mins = (total_time/3600)/60
+        if np.floor(time_mins)>0:
+            time_secs  = (time_mins%np.floor(time_mins))*60
+        else:
+            time_secs = total_time
+        print(f'Total Time: {int(time_hrs)}:{int(np.floor(time_mins))}:{round(time_secs,3)}')
         print(res)
         m_post = res.x
-    
+
         pandz = sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage)
         np.save(workdir.joinpath('results/PolesandZeros.npy'),pandz)
         print('Plotting')
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
-        write_metadata(workdir,phases_per_stage,coeffs_per_stage,res,ftol,nfrequency,sinc_dec,paths,channel)
+        write_metadata(workdir,phases_per_stage,coeffs_per_stage,res,ftol,nfrequency,sinc_dec,paths,channel,total_time)
 
     else:
         pandz =  np.load(workdir.joinpath('results/PolesandZeros.npy'))
@@ -365,5 +381,6 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optim
     out_plots(pandz,coeffs_per_stage,phases_per_stage,frequencies,X_spectra,Y_spectra,pulses,figpath)
     create_nice_figures(poles_final,zeros_final,workdir,frequencies,coeffs_per_stage,phases_per_stage)
     create_fir_filter_PZs(workdir)
+    print('Regression complete !')
     return
 
