@@ -371,6 +371,7 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optim
 
         pandz = sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage)
         np.save(workdir.joinpath('results/PolesandZeros.npy'),pandz)
+        np.save(workdir.joinpath('results/PolesandZeros_Dimensionless.npy'),pandz/500)
         print('Plotting')
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]

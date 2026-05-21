@@ -409,8 +409,9 @@ def compute_impulse_response(H,freqs):
     ret = np.fft.irfft(Hp)
     return ret
 def compute_step_response(H,freqs):
-    step = 1/freqs
-    step[0] = 1
+    step = np.ones_like(H.real)
+    step[0] = 0
+    step = np.fft.rfft(step,n=2*H.shape[0]-1)
     Hp = step*H
     ret = np.fft.irfft(Hp)
     return ret
@@ -457,20 +458,20 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,ph
 
     #   Transfer function (rad)
     fig,ax  = plt.subplots(2,layout='constrained')
-
-    ax[0].plot(frequencies_rad,20*np.log10(H.real.__abs__()))
-    ax[0].set_xlim(0,500*2*np.pi)
-    ax[0].set_xlabel(r'$\omega$ (rad/s)')
+    sample_rate = 500*2*np.pi
+    ax[0].plot(frequencies_rad/sample_rate,20*np.log10(H.real.__abs__()))
+    ax[0].set_xlim(0,sample_rate/sample_rate)
+    ax[0].set_xlabel(r'Normalised Frequency (f/fdata)')
     ax[0].set_ylabel(r'Response (dB)')
-
-    ax[1].plot(frequencies_rad,np.unwrap(phase)/np.pi)
-    ax[1].set_xlabel(r'$\omega$ (rad/s)')
+    
+    ax[1].plot(frequencies_rad/sample_rate,np.unwrap(phase)/np.pi)
+    ax[1].set_xlabel(r'Normalised Frequency (f/fdata)')
     ax[1].set_ylabel(r'Phase (multiples of $\pi$)')
-    ax[1].set_xlim(0,500*2*np.pi)
-    ax[0].axvline(206.5*2*np.pi,label = 'TI Corner Frequency',color='r')
-    ax[1].axvline(206.5*2*np.pi,color='r')
-    ax[0].axvline(250*2*np.pi,color='k',linestyle = '--',label = 'Nyqvist')
-    ax[1].axvline(250*2*np.pi,color='k',linestyle = '--')
+    ax[1].set_xlim(0,sample_rate/sample_rate)
+    ax[0].axvline(206.5*2*np.pi/sample_rate,label = 'TI Corner Frequency',color='r')
+    ax[1].axvline(206.5*2*np.pi/sample_rate,color='r')
+    ax[0].axvline(250*2*np.pi/sample_rate,color='k',linestyle = '--',label = 'Nyqvist')
+    ax[1].axvline(250*2*np.pi/sample_rate,color='k',linestyle = '--')
     ax[0].legend()
     plt.savefig(NICE_FIGURES.joinpath('frequency_response_non_log.png'),dpi=256)
     plt.close()
@@ -505,14 +506,17 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,ph
     impulse = compute_impulse_response(H,frequencies_rad)
     fig,(ax,ax1) = plt.subplots(2,layout='constrained')
   
-    ax.plot(np.linspace(0,impulse.shape[0]/500,impulse.shape[0]),impulse)
-    ax.set_xlabel('Seconds')
-  
+    ax.plot(np.linspace(0,impulse.shape[0],impulse.shape[0]),impulse)
+    ax.set_xlabel('Samples')
+    ax.set_xlim(0,100)
+    ax.axvline(5,label='5 Samples',color='r')
     ax.set_ylabel('Impulse Response')
 
     step = compute_step_response(H,frequencies_rad)
-    ax1.plot(np.linspace(0,step.shape[0]/500,step.shape[0]),step)
-    ax1.set_xlabel('Seconds')
+    ax1.plot(np.linspace(0,step.shape[0],step.shape[0]),step)
+    ax1.set_xlim(0,64)
+    ax1.axvline(5,label='5 Samples',color='r')
+    ax1.set_xlabel('Samples')
     ax1.set_ylabel('Step Response')
    
     plt.savefig(NICE_FIGURES.joinpath('impulse_step_response.png'),dpi=256)
@@ -536,9 +540,9 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,ph
     group_delay = compute_group_delay(np.unwrap(phase),frequencies_rad)
 
   
-    ax.plot(frequencies_hz[1:],group_delay)
+    ax.plot(frequencies_hz[1:],group_delay*500)
     ax.set_xlabel('Frequency (Hz)')
-    ax.set_ylabel('Group Delay (s)')
+    ax.set_ylabel('Group Delay (samples)')
     ax.set_xlim(0,500)
     ax.axvline(206.5,label = 'TI Corner Frequency',color='r')
     ax.axvline(250,color='k',linestyle = '--',label = 'Nyqvist')
