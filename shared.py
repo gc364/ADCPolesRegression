@@ -228,8 +228,13 @@ def load_xy(pulses_path,data_path,workdir,nfrequency,channel):
     y_time  = cut_timeseries(y,chattr,x_start_times,length_seconds)
     n = nfrequency   #   The length of the spectra
     #   Calculate Y spectra
-    Y_spectra = [np.fft.rfft(y,n=n) for y in y_time]
-    Y_frequencies = np.fft.rfftfreq(n=n,d=1/chattr['sample_rate_hz'])
+    Y_spectra = [np.fft.fft(y,n=n) for y in y_time]
+    Y_frequencies = np.fft.fftfreq(n=n,d=1/chattr['sample_rate_hz'])
+
+    mask  = Y_frequencies >=0 
+    Y_frequencies = Y_frequencies[mask]
+    Y_spectra = [y[mask] for y in Y_spectra]
+
 
     target_high = chattr['sample_rate_hz']#500  #The highest frequency we're interested in
     df_y = Y_frequencies[1]-Y_frequencies[0]
@@ -458,11 +463,15 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,ph
     ax[0].set_xlabel(r'$\omega$ (rad/s)')
     ax[0].set_ylabel(r'Response (dB)')
 
-    ax[1].plot(frequencies_rad,phase)
+    ax[1].plot(frequencies_rad,np.unwrap(phase)/np.pi)
     ax[1].set_xlabel(r'$\omega$ (rad/s)')
-    ax[1].set_ylabel(r'Phase (rad)')
+    ax[1].set_ylabel(r'Phase (multiples of $\pi$)')
     ax[1].set_xlim(0,500*2*np.pi)
-    ax[0].axvline(206.5*2*np.pi)
+    ax[0].axvline(206.5*2*np.pi,label = 'TI Corner Frequency',color='r')
+    ax[1].axvline(206.5*2*np.pi,color='r')
+    ax[0].axvline(250*2*np.pi,color='k',linestyle = '--',label = 'Nyqvist')
+    ax[1].axvline(250*2*np.pi,color='k',linestyle = '--')
+    ax[0].legend()
     plt.savefig(NICE_FIGURES.joinpath('frequency_response_non_log.png'),dpi=256)
     plt.close()
 
@@ -519,6 +528,7 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,ph
     ax[1].set_ylabel('Denomimator Coefficents')     
     plt.savefig(NICE_FIGURES.joinpath('coefficient_spectra.png')  )
     plt.close()
+    
 
     #   Group delay
 
@@ -530,6 +540,9 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,ph
     ax.set_xlabel('Frequency (Hz)')
     ax.set_ylabel('Group Delay (s)')
     ax.set_xlim(0,500)
+    ax.axvline(206.5,label = 'TI Corner Frequency',color='r')
+    ax.axvline(250,color='k',linestyle = '--',label = 'Nyqvist')
+    ax.legend()
     plt.savefig(NICE_FIGURES.joinpath('group_delay.png'),dpi=256)
     plt.close()
 
