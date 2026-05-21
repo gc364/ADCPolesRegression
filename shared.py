@@ -416,9 +416,9 @@ def compute_step_response(H,freqs):
     ret = np.fft.irfft(Hp)
     return ret
 
-def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,phases_per_stage):
+def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,phases_per_stage,datalogger_sample_rate):
     
-    NICE_FIGURES  = workdir.joinpath('figures/nice_figures')
+    NICE_FIGURES  = workdir.joinpath('figures/output')
     
     #   For the corner frequency we define it as the frequency where 
     #   the gain has dropped by 3dB
@@ -441,52 +441,25 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,ph
 
     phase = np.angle(H)
 
-    #   Transfer function (rad)
-    fig,ax  = plt.subplots(2,layout='constrained')
-    ax[0].plot(frequencies_rad,20*np.log10(H.real.__abs__()))
 
-    ax[0].semilogx()
-    ax[0].set_xlabel(r'$\omega$ (rad/s)')
-    ax[0].set_ylabel(r'Response (dB)')
-    ax[1].plot(frequencies_rad,phase)
-    ax[1].set_xlabel(r'$\omega$ (rad/s)')
-    ax[1].set_ylabel(r'Phase (rad)')
-    ax[1].set_xlim(0,500*2*np.pi)
-    ax[0].axvline(206.5*2*np.pi)
-    plt.savefig(NICE_FIGURES.joinpath('frequency_response.png'),dpi=256)
-    plt.close()
-
-    #   Transfer function (rad)
+    #   Transfer function 
     fig,ax  = plt.subplots(2,layout='constrained')
-    sample_rate = 500*2*np.pi
+    fig.suptitle(f'Datalogger Sample Rate: {datalogger_sample_rate} Hz')
+    sample_rate = datalogger_sample_rate*2*np.pi
     ax[0].plot(frequencies_rad/sample_rate,20*np.log10(H.real.__abs__()))
-    ax[0].set_xlim(0,sample_rate/sample_rate)
+    ax[0].set_xlim(0,1)
     ax[0].set_xlabel(r'Normalised Frequency (f/fdata)')
     ax[0].set_ylabel(r'Response (dB)')
-    
     ax[1].plot(frequencies_rad/sample_rate,np.unwrap(phase)/np.pi)
     ax[1].set_xlabel(r'Normalised Frequency (f/fdata)')
     ax[1].set_ylabel(r'Phase (multiples of $\pi$)')
     ax[1].set_xlim(0,sample_rate/sample_rate)
-    ax[0].axvline(206.5*2*np.pi/sample_rate,label = 'TI Corner Frequency',color='r')
-    ax[1].axvline(206.5*2*np.pi/sample_rate,color='r')
-    ax[0].axvline(250*2*np.pi/sample_rate,color='k',linestyle = '--',label = 'Nyqvist')
-    ax[1].axvline(250*2*np.pi/sample_rate,color='k',linestyle = '--')
+    ax[0].axvline(0.8*.5,label = 'TI Corner Frequency',color='r')
+    ax[1].axvline(0.8*.5,color='r')
+    ax[0].axvline(0.5,color='k',linestyle = '--',label = 'Nyqvist')
+    ax[1].axvline(0.5,color='k',linestyle = '--')
     ax[0].legend()
-    plt.savefig(NICE_FIGURES.joinpath('frequency_response_non_log.png'),dpi=256)
-    plt.close()
-
-    #   Transfer function (Hz)
-    fig,ax  = plt.subplots(2,layout='constrained')
-    ax[0].plot(frequencies_hz,20*np.log10(H.real.__abs__()))
-    ax[0].semilogx()
-    ax[0].set_xlabel(r'$f$ (Hz)')
-    ax[0].set_ylabel(r'Response (dB)')
-    ax[1].plot(frequencies_hz,phase)
-    ax[1].set_xlabel(r'$f$ (Hz)')
-    ax[1].set_ylabel(r'Phase (rad)')
-    ax[0].axvline(206.5)
-    plt.savefig(NICE_FIGURES.joinpath('frequency_response_hz.png'),dpi=256)
+    plt.savefig(NICE_FIGURES.joinpath(f'frequency_response_non_log_{datalogger_sample_rate}.png'),dpi=256)
     plt.close()
 
 
@@ -497,15 +470,15 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,ph
     corner_freq_ind = np.argmin(abs(tf[max_gain:]-(tf[max_gain]-3)))+max_gain
     corner_freq = frequencies_rad[corner_freq_ind]
     print(f'Located Corner Frequency:   {corner_freq/(2*np.pi)} Hz')
-     #   Time domain impulse/step response
-    times = np.arange(0,25000/500,1/500)
+
+
     assert b.shape[0]==a.shape[0]
   
 
     
     impulse = compute_impulse_response(H,frequencies_rad)
     fig,(ax,ax1) = plt.subplots(2,layout='constrained')
-  
+    fig.suptitle(f'Datalogger Sample Rate: {datalogger_sample_rate} Hz')
     ax.plot(np.linspace(0,impulse.shape[0],impulse.shape[0]),impulse)
     ax.set_xlabel('Samples')
     ax.set_xlim(0,100)
@@ -518,8 +491,8 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,ph
     ax1.axvline(5,label='5 Samples',color='r')
     ax1.set_xlabel('Samples')
     ax1.set_ylabel('Step Response')
-   
-    plt.savefig(NICE_FIGURES.joinpath('impulse_step_response.png'),dpi=256)
+    ax1.legend()
+    plt.savefig(NICE_FIGURES.joinpath(f'impulse_step_response_{datalogger_sample_rate}.png'),dpi=256)
     plt.close()
 
     #   Coefficient spectra
@@ -539,22 +512,23 @@ def create_nice_figures(poles,zeros,workdir,data_frequencies,coeffs_per_stage,ph
     fig,ax = plt.subplots(layout='constrained')
     group_delay = compute_group_delay(np.unwrap(phase),frequencies_rad)
 
-  
-    ax.plot(frequencies_hz[1:],group_delay*500)
-    ax.set_xlabel('Frequency (Hz)')
+    ax.set_title(f'Datalogger Sample Rate: {datalogger_sample_rate} Hz')
+    ax.plot(frequencies_hz[1:]/datalogger_sample_rate,group_delay*500)
+    ax.set_xlabel('Normalised Frequency (f/fdata)')
     ax.set_ylabel('Group Delay (samples)')
-    ax.set_xlim(0,500)
-    ax.axvline(206.5,label = 'TI Corner Frequency',color='r')
-    ax.axvline(250,color='k',linestyle = '--',label = 'Nyqvist')
+    ax.set_xlim(0,1)
+    ax.axvline(0.8*0.5,label = 'TI Corner Frequency',color='r')
+    ax.axvline(0.5,color='k',linestyle = '--',label = 'Nyqvist')
     ax.legend()
-    plt.savefig(NICE_FIGURES.joinpath('group_delay.png'),dpi=256)
+    plt.savefig(NICE_FIGURES.joinpath(f'group_delay_{datalogger_sample_rate}.png'),dpi=256)
     plt.close()
 
     return
 
-def out_plots(pandz,coeffs_per_stage,phases_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH):
+def out_plots(pandz,coeffs_per_stage,phases_per_stage,frequencies,X_spectra,Y_spectra,pulses,FIGPATH,datalogger_sample_rate):
     #   We need to reorder these before handing them to apply stages
     poles_final,zeros_final = pandz[:,0],pandz[:,1] #   These are in order of stages, with the conjugates
+    
     poles_list = []
     zeros_list = []
     ind_run = 0
@@ -579,22 +553,32 @@ def out_plots(pandz,coeffs_per_stage,phases_per_stage,frequencies,X_spectra,Y_sp
         data_reconst = apply_stages(poles_final_as,zeros_final_as,X_spectra,Y_spectra,frequencies,coeffs_per_stage_c,True)
 
     gain = calculate_gain(abs(X_spectra[0]),10**data_reconst[0])
-
+    poles_final =poles_final.copy()/(datalogger_sample_rate*2*np.pi)
+    zeros_final =zeros_final.copy()/(datalogger_sample_rate*2*np.pi)
     fig,ax =plt.subplots()
-    ax.plot(frequencies,gain)
+    ax.set_title(f'Datalogger Sample Rate: {datalogger_sample_rate} Hz')
+    ax.plot(frequencies/(datalogger_sample_rate),gain)
     ax.set_ylabel('Gain (dB)')
     ax.axhline(128,color = 'k',linestyle='--')
     ax.axhline(64,color = 'k',linestyle='--')
     ax.axhline(32,color = 'k',linestyle='--')
     ax.axhline(16,color = 'k',linestyle='--')
-    ax.set_xlim(0,500)
-    ax.set_xlabel('Frequency (Hz)')
-    plt.savefig(f'{FIGPATH}/gain.png',dpi=256)
+    ax.set_xlim(0,1)
+    ax.set_xlabel('Normalised Frequency (f/fdata)')
+    plt.savefig(f'{FIGPATH}/gain_{datalogger_sample_rate}.png',dpi=256)
 
 
     fig,ax = plt.subplots(layout='constrained')
     ax.plot(poles_final.real,poles_final.imag,'x',label='Poles')
     ax.plot(zeros_final.real,zeros_final.imag,'o',label='Zeros')
+    
+    ax.set_ylabel(r'$\mathfrak{Im} $ (f/fdata)')
+    ax.set_xlabel(r'$\mathfrak{Re} $ (f/fdata)')
+    ax.grid()
+    plt.savefig(f'{FIGPATH}/PoleandZeros.png')
+    fig,ax = plt.subplots(layout='constrained')
+    ax.plot(poles_final.real*datalogger_sample_rate*2*np.pi,poles_final.imag*(datalogger_sample_rate*2*np.pi),'x',label='Poles')
+    ax.plot(zeros_final.real*datalogger_sample_rate*2*np.pi,zeros_final.imag*(datalogger_sample_rate)*2*np.pi,'o',label='Zeros')
     x = np.linspace(-1,1,100)
     y = np.sqrt(1-x**2)
     ax.plot(x,y,'k--')
@@ -602,14 +586,7 @@ def out_plots(pandz,coeffs_per_stage,phases_per_stage,frequencies,X_spectra,Y_sp
     ax.set_ylabel(r'$\mathfrak{Im} (rad/s)$')
     ax.set_xlabel(r'$\mathfrak{Re} (rad/s)$')
     ax.grid()
-    plt.savefig(f'{FIGPATH}/PoleandZeros.png')
-    fig,ax = plt.subplots(layout='constrained')
-    ax.plot(poles_final.real/(2*np.pi),poles_final.imag/(2*np.pi),'x',label='Poles')
-    ax.plot(zeros_final.real/(2*np.pi),zeros_final.imag/(2*np.pi),'o',label='Zeros')
-    ax.set_ylabel(r'$\mathfrak{Im} (Hz)$')
-    ax.set_xlabel(r'$\mathfrak{Re} (Hz)$')
-    ax.grid()
-    plt.savefig(f'{FIGPATH}/PoleandZerosHz.png')
+    plt.savefig(f'{FIGPATH}/PoleandZerosRads.png')
 
     fig,(ax,ax1) = plt.subplots(2,layout='constrained')
     ax.set_xlabel('Iteration')

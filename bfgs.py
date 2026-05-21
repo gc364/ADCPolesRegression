@@ -288,7 +288,7 @@ def sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage):
     pandz = np.vstack(pandz_list)
     return pandz
 
-def write_metadata(workdir,phases_per_stage,coeffs_per_stage,res:OptimizeResult,ftol,nfrequency,sinc_dec,data_dirs,channel,total_time):
+def write_metadata(workdir,phases_per_stage,coeffs_per_stage,res:OptimizeResult,ftol,nfrequency,sinc_dec,data_dirs,channel,total_time,datalogger_sample_rate):
     number_of_stages = len(phases_per_stage)
     file = workdir.joinpath('metadata.json')
     file.touch(exist_ok=True)
@@ -296,6 +296,7 @@ def write_metadata(workdir,phases_per_stage,coeffs_per_stage,res:OptimizeResult,
 
     metadata = {}
     metadata.update({'data_files':[str(dd) for dd in nc_files]})
+    metadata.update({'datalogger_sample_rate':datalogger_sample_rate})
     metadata.update({'channel':channel})
     metadata.update({'number_of_stages':number_of_stages})
     metadata.update({'nfrequency':nfrequency})
@@ -321,9 +322,9 @@ def write_metadata(workdir,phases_per_stage,coeffs_per_stage,res:OptimizeResult,
     
     return
 
-def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optimise,ftol,sinc_dec,nfrequency,channel):
+def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optimise,ftol,sinc_dec,nfrequency,channel,datalogger_sample_rate):
     num_workers = 1
-    figpath = workdir.joinpath('figures/bfgs')
+    figpath = workdir.joinpath('figures/output')
     f_type='FIR'    #   Hardcoded as it can't handle IIR at all
     X_spectra,Y_spectra,frequencies,pulses = load_datasets(paths,workdir,nfrequency,channel,sinc_dec)
     print('Datasets Loaded')
@@ -371,19 +372,19 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optim
 
         pandz = sort_mpost(m_post,nz,set_poles,phases_per_stage,coeffs_per_stage)
         np.save(workdir.joinpath('results/PolesandZeros.npy'),pandz)
-        np.save(workdir.joinpath('results/PolesandZeros_Dimensionless.npy'),pandz/500)
+        np.save(workdir.joinpath('results/PolesandZeros_Dimensionless.npy'),pandz/(datalogger_sample_rate*2*np.pi))
         print('Plotting')
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
-        write_metadata(workdir,phases_per_stage,coeffs_per_stage,res,ftol,nfrequency,sinc_dec,paths,channel,total_time)
+        write_metadata(workdir,phases_per_stage,coeffs_per_stage,res,ftol,nfrequency,sinc_dec,paths,channel,total_time,datalogger_sample_rate)
 
     else:
         pandz =  np.load(workdir.joinpath('results/PolesandZeros.npy'))
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
      
-    out_plots(pandz,coeffs_per_stage,phases_per_stage,frequencies,X_spectra,Y_spectra,pulses,figpath)
-    create_nice_figures(poles_final,zeros_final,workdir,frequencies,coeffs_per_stage,phases_per_stage)
+    out_plots(pandz,coeffs_per_stage,phases_per_stage,frequencies,X_spectra,Y_spectra,pulses,figpath,datalogger_sample_rate)
+    create_nice_figures(poles_final,zeros_final,workdir,frequencies,coeffs_per_stage,phases_per_stage,datalogger_sample_rate)
     create_fir_filter_PZs(workdir)
     print('Regression complete !')
     return

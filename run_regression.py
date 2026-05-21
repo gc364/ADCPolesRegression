@@ -11,19 +11,19 @@ if __name__ == '__main__':
     parser.add_argument('channel',type=str,help='The channel to analyse (e.g. ch00)')
     parser.add_argument('stages',type=str,help='Comma seperated list of the type of filter (LINEAR or MIN) for each stage')
     parser.add_argument('num_coeffs',type=str,help='Comma seperated list of the number of coefficients for each stage')
+    parser.add_argument('--datalogger_sample_rate',type=int,help='The sample rate the data was collected at in Hz',required=False,default=250)
     parser.add_argument('--sinc_decimation',type=str,help='Comma seperated list of sinc decimations',required=False,default=None)
-    parser.add_argument('--plots_only',type=bool,help='Only generate plots?',required=False,default=False)
+    parser.add_argument('--plots_only',action='store_true',help='Only generate plots?',required=False)
     parser.add_argument('--ftol',type=float,help='Function change threshold for termination',required=False,default=1e-5)
     parser.add_argument('--nepochs',type=int,help='Maximum number of function evaluations',required=False,default=200)
     parser.add_argument('--nfrequency',type=int,help='Number of frequency points in the data fft. Higher means a higher frequency resolution',required=False,default=12000)
-  
+    
     args = parser.parse_args()
      
     workdir = args.working_directory
     workdir = workdir.joinpath(f'{args.channel}')
     workdir.mkdir(exist_ok=True)
-    workdir.joinpath('figures/bfgs').mkdir(exist_ok=True,parents=True)
-    workdir.joinpath('figures/nice_figures').mkdir(exist_ok=True)
+    workdir.joinpath('figures/output').mkdir(exist_ok=True,parents=True)
     workdir.joinpath('results').mkdir(exist_ok=True)
 
     #   Datasets to load
@@ -37,6 +37,6 @@ if __name__ == '__main__':
     #   If True, will create a new optimisation, else just reruns plotting
     new_optimise = not args.plots_only
 
-    main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,args.nepochs,new_optimise,args.ftol,sinc_dec,args.nfrequency,args.channel)
+    main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,args.nepochs,new_optimise,args.ftol,sinc_dec,args.nfrequency,args.channel,args.datalogger_sample_rate)
 
     exit()
