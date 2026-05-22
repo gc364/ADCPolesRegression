@@ -6,6 +6,8 @@ from shared import *
 from types import SimpleNamespace
 import json
 import datetime
+from xml.etree import ElementTree as gfg
+import obspy
 
 def objective_lbfgs(m,nzeros,X_spectra,Y_spectra,frequencies,phases_per_stage,
                     scipy=False,coeffs_per_stage=None,set_poles=None):
@@ -321,7 +323,135 @@ def write_metadata(workdir,phases_per_stage,coeffs_per_stage,res:OptimizeResult,
         json.dump(metadata,fd,indent=1)
     
     return
+def create_top_station_xml(channel,datalogger_s_r):
+    xml_file = gfg.Element('FDSNStationXML',attrib={'xmlns':"http://www.fdsn.org/xml/station/1",
+                                                    'schemaVersion':"1.2"})
+    src = gfg.SubElement(xml_file,'Source')
+    src.text  = 'test'
+    src = gfg.SubElement(xml_file,'Created')
+    src.text = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    Net = gfg.SubElement(xml_file,'Network',attrib={'code':'XX'})
+    Sta = gfg.SubElement(Net,'Station',attrib={'code':'ABCD'})
 
+    lat =  gfg.SubElement(Sta,'Latitude',attrib={'unit':'DEGREES'})
+    lat.text = '0.0'
+    long =  gfg.SubElement(Sta,'Longitude',attrib={'unit':'DEGREES'})
+    long.text = '0.0'
+    el =  gfg.SubElement(Sta,'Elevation')
+    el.text = '0.0'
+    site = gfg.SubElement(Sta,'Site')
+    nm = gfg.SubElement(site,'Name')
+    nm.text = 'None'
+
+    Chan = gfg.SubElement(Sta,'Channel',attrib={'code':channel,'locationCode':'00'})
+    lat =  gfg.SubElement(Chan,'Latitude',attrib={'unit':'DEGREES'})
+    lat.text = '0.0'
+    long =  gfg.SubElement(Chan,'Longitude',attrib={'unit':'DEGREES'})
+    long.text = '0.0'
+    el =  gfg.SubElement(Chan,'Elevation')
+    el.text = '0.0'
+    dep =  gfg.SubElement(Chan,'Depth')
+    dep.text = '0.0'
+
+    az =  gfg.SubElement(Chan,'Azimuth')
+    az.text = '0.0'
+
+    dip =  gfg.SubElement(Chan,'Dip')
+    dip.text = '0.0'
+    
+
+    sr = gfg.SubElement(Chan,'SampleRate')
+    sr.text = str(datalogger_s_r)
+
+    return Chan,xml_file
+def create_station_xml_response(pandz,workdir,channel,datalogger_s_r):
+    
+    zeros = pandz[:,1].copy()
+    poles  = pandz[:,0].copy()
+
+    chan,xml_file = create_top_station_xml(channel,datalogger_s_r)
+  
+    resp = gfg.SubElement(chan,'Response')
+    sens = gfg.SubElement(resp,'InstrumentSensitivity')
+    v = gfg.SubElement(sens,'Value')
+    v.text = '1'
+    v = gfg.SubElement(sens,'Frequency')
+    v.text = str(datalogger_s_r//2)
+
+    units = gfg.SubElement(sens,'InputUnits')
+
+    un = gfg.SubElement(units,'Name')
+    un.text = 'V'
+    un = gfg.SubElement(units,'Description')
+    un.text = 'Volts'
+    units = gfg.SubElement(sens,'OutputUnits')
+    un = gfg.SubElement(units,'Name')
+    un.text = 'counts'
+    un = gfg.SubElement(units,'Description')
+    un.text = 'Digital Counts'
+
+    stage = gfg.SubElement(resp,'Stage',attrib={'number':'1'})
+    PZ = gfg.SubElement(stage,'FIR')
+
+    units = gfg.SubElement(PZ,'InputUnits')
+
+    un = gfg.SubElement(units,'Name')
+    un.text = 'V'
+    un = gfg.SubElement(units,'Description')
+    un.text = 'Volts'
+    units = gfg.SubElement(PZ,'OutputUnits')
+    un = gfg.SubElement(units,'Name')
+    un.text = 'counts'
+    un = gfg.SubElement(units,'Description')
+    un.text = 'Digital Counts'
+    un = gfg.SubElement(PZ,'Symmetry')
+    un.text = 'NONE'    
+
+    num,den  = to_coefficents(poles,zeros)
+    i=0
+    for n in num.real:
+        c = gfg.SubElement(PZ,'NumeratorCoefficient',attrib={'number':str(i)})
+        c.text = str(n)
+        
+        i+=1
+    
+    dec = gfg.SubElement(stage,'Decimation')
+    isr = gfg.SubElement(dec,'InputSampleRate')
+    isr.text = str(datalogger_s_r)
+
+    fac = gfg.SubElement(dec,'Factor')
+    fac.text = '1'
+
+    fac = gfg.SubElement(dec,'Offset')
+    fac.text = '0'
+
+    fac = gfg.SubElement(dec,'Delay')
+    fac.text = '0'
+
+    fac = gfg.SubElement(dec,'Correction')
+    fac.text = '0'
+ 
+
+    gain = gfg.SubElement(stage,'StageGain')
+    n = gfg.SubElement(gain,'Value')
+    n.text = '1'
+    n = gfg.SubElement(gain,'Frequency')
+    n.text = str(datalogger_s_r//2)
+    tree = gfg.ElementTree(xml_file)
+    with open (workdir.joinpath('results/StationXML.xml'), "wb") as fd :
+        tree.write(fd)
+
+    return
+
+def station_xml_test(workdir):
+    try:
+        inv = obspy.read_inventory(workdir.joinpath('results/StationXML.xml'))
+        inv.plot_response(0.001,'DEF',show=False,unwrap_phase=True)
+    except:
+        print('!*30')
+        raise UserWarning('Filter Failed to Load from StationXML !!!')
+        print('!*30')
+    return
 def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optimise,ftol,sinc_dec,nfrequency,channel,datalogger_sample_rate):
     num_workers = 1
     figpath = workdir.joinpath('figures/output')
@@ -382,7 +512,8 @@ def main_lbfgs(paths,coeffs_per_stage,phases_per_stage,workdir,nepochs,new_optim
         pandz =  np.load(workdir.joinpath('results/PolesandZeros.npy'))
         poles_final = pandz[:,0]
         zeros_final = pandz[:,1]
-     
+    create_station_xml_response(pandz,workdir,channel,datalogger_sample_rate)
+    station_xml_test(workdir)
     out_plots(pandz,coeffs_per_stage,phases_per_stage,frequencies,X_spectra,Y_spectra,pulses,figpath,datalogger_sample_rate)
     create_nice_figures(poles_final,zeros_final,workdir,frequencies,coeffs_per_stage,phases_per_stage,datalogger_sample_rate)
     create_fir_filter_PZs(workdir)
